@@ -8,6 +8,7 @@ DEFAULTS = {
     "adb_host": "192.168.240.112:5555", "auto_check": "1",
     "download_dir": str(Path.home() / "Downloads"),
     "apk_dir": str(Path.home() / "Downloads"),
+    "window_size": "1100x700",
 }
 
 

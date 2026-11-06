@@ -79,3 +79,8 @@ def test_settings(tmp_path):
         s.set("nope", 1)
     s.log_launch("a.b"); s.log_launch("c.d"); s.log_launch("a.b")
     assert s.recent() == ["a.b", "c.d"]
+
+
+def test_format_report():
+    text = d.format_report(rep(has_adb=False))
+    assert "Partially Compatible" in text and "adb" in text.lower()

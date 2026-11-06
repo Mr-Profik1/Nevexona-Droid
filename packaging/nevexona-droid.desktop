@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NEVEXONA Droid
+Comment=Android apps on Linux via Waydroid
+Exec=nevexona-droid
+Icon=nevexona-droid
+Terminal=false
+Categories=System;Emulator;

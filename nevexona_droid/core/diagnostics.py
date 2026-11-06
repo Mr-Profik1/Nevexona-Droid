@@ -87,3 +87,17 @@ def collect(path="/") -> Report:
         has_binder=_has_binder(),
     )
     return evaluate(r)
+
+
+def format_report(r: Report) -> str:
+    lines = [f"Результат: {r.verdict}", "",
+             f"CPU: {r.arch}", f"RAM: {r.ram_mb} МБ", f"Свободно: {r.free_gb:.1f} ГБ",
+             f"Ядро: {r.kernel}", f"Сессия: {r.session}",
+             f"binder: {'да' if r.has_binder else 'нет'}",
+             f"Waydroid: {'есть' if r.has_waydroid else 'нет'}",
+             f"ADB: {'есть' if r.has_adb else 'нет'}"]
+    if r.problems:
+        lines += ["", "Замечания:"] + [f"• {p}" for p in r.problems]
+    if r.advice:
+        lines += ["", "Рекомендации:"] + [f"• {a}" for a in r.advice]
+    return "\n".join(lines)
