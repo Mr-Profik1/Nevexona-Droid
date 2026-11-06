@@ -58,7 +58,11 @@ class Page(QWidget):
         if engine.get_state() != engine.State.RUNNING:
             return a, "Android не запущен. Нажмите Start Android."
         a.connect()
-        if not a.is_online():
+        st = a.state()
+        if st == "unauthorized":
+            return a, ("Android ждёт разрешения на отладку по ADB. Нажмите Show Android, "
+                       "подтвердите диалог в окне Android и повторите.")
+        if st != "device":
             return a, "Не удаётся подключиться к Android по ADB. Проверьте адрес в настройках."
         return a, None
 
@@ -72,7 +76,8 @@ class Dashboard(Page):
         self.lay.addWidget(self.status)
         self.start_b = _button("Start Android", self.start, True)
         self.stop_b = _button("Stop Android", self.stop)
-        self.lay.addLayout(_row(self.start_b, self.stop_b,
+        self.show_b = _button("Show Android", self.show_ui)
+        self.lay.addLayout(_row(self.start_b, self.show_b, self.stop_b,
                                 _button("Install APK", lambda: win.open_apk_install())))
         self.adb_l, self.count_l = _label(""), _label("")
         self.lay.addWidget(self.adb_l)
@@ -107,6 +112,7 @@ class Dashboard(Page):
             self.status.setText(f"Android Engine: {st.value}")
             self.start_b.setEnabled(st in (engine.State.READY, engine.State.STOPPED))
             self.stop_b.setEnabled(st in (engine.State.RUNNING, engine.State.STARTING))
+            self.show_b.setEnabled(st == engine.State.RUNNING)
             self.adb_l.setText("ADB: " + ("подключён" if online else "установлен, нет подключения" if has else "не установлен"))
             self.count_l.setText("Установлено приложений: " + (str(n) if n is not None else "— (Android не подключён)"))
             self.recent.clear()
@@ -115,14 +121,21 @@ class Dashboard(Page):
         spawn(probe, show)
 
     def start(self):
-        if engine.get_state() == engine.State.NOT_INSTALLED:
-            return _err(self, "Waydroid не установлен. См. раздел Android Engine.")
-        try:
+        def job():
+            if engine.get_state() == engine.State.NOT_INSTALLED:
+                raise RuntimeError("Waydroid не установлен. См. раздел Android Engine.")
             engine.start()
-        except OSError as e:
-            return _err(self, e)
-        self.status.setText("Android Engine: Starting")
-        self.win.poll_soon()
+
+        def done(_, err):
+            if err:
+                return _err(self, err)
+            self.status.setText("Android Engine: Starting")
+            self.win.poll_soon()
+        spawn(job, done)
+
+    def show_ui(self):
+        spawn(engine.show_ui, lambda r, e: _err(self, e or r.err or r.out)
+              if (e or not r.ok) else None)
 
     def stop(self):
         spawn(engine.stop, lambda r, e: (_err(self, e or r.err) if (e or not r.ok) else None, self.refresh()))
@@ -433,11 +446,18 @@ class Settings(Page):
                      ("auto_check", "1" if self.auto.isChecked() else "0")):
             s.set(k, v)
         self.win.apply_theme()
-        if engine.get_state() == engine.State.RUNNING:
-            w, h = self.res.text().split("x")
+        w, h = self.res.text().split("x")
+
+        def job():
+            if engine.get_state() != engine.State.RUNNING:
+                return False
             for key, val in (("persist.waydroid.width", w), ("persist.waydroid.height", h)):
                 run(["waydroid", "prop", "set", key, val])
-            _err(self, "Сохранено. Разрешение применится после перезапуска Android.")
+            return True
+
+        spawn(job, lambda applied, e: _err(
+            self, e or ("Сохранено. Разрешение применится после перезапуска Android."
+                        if applied else "Сохранено.")))
 
     def clear(self):
         d, n = self.svc.settings.get("download_dir"), 0

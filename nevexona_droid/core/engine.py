@@ -33,7 +33,8 @@ def get_state(runner=run, which=shutil.which) -> State:
     info = parse_status(res.out)
     session = info.get("session", "").upper()
     container = info.get("container", "").upper()
-    if session == "RUNNING" and container == "RUNNING":
+    # FROZEN — Waydroid замораживает контейнер без открытых окон; Android при этом жив.
+    if session == "RUNNING" and container in ("RUNNING", "FROZEN"):
         return State.RUNNING
     if session == "RUNNING":
         return State.STARTING
@@ -52,6 +53,15 @@ def start():
     return subprocess.Popen(["waydroid", "session", "start"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=True)
+
+
+def show_ui_command():
+    """Показать окно Android (без этого сессия работает, но окна нет)."""
+    return ["waydroid", "show-full-ui"]
+
+
+def show_ui(runner=run):
+    return runner(show_ui_command(), timeout=30)
 
 
 def stop(runner=run):

@@ -6,3 +6,5 @@ Exec=nevexona-droid
 Icon=nevexona-droid
 Terminal=false
 Categories=System;Emulator;
+StartupNotify=true
+Keywords=android;waydroid;apk;

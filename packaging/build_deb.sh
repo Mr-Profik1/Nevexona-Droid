@@ -19,11 +19,15 @@ Section: utils
 Priority: optional
 Architecture: all
 Maintainer: NEVEXONA Corporation <noreply@nevexona.invalid>
-Depends: python3 (>= 3.10)
-Recommends: python3-pyside6.qtwidgets, adb, waydroid
+Depends: python3 (>= 3.10), python3-pyside6.qtwidgets
+Recommends: adb, waydroid
+Homepage: https://github.com/Mr-Profik1/Nevexona-Droid
 Description: NEVEXONA Droid - Android apps on Linux
  Graphical manager for Waydroid and ADB: install APKs, F-Droid catalog.
- Waydroid and PySide6 are installed separately (see README).
+ Waydroid is installed separately (see README).
 CTL
+printf '#!/bin/sh\nset -e\npython3 -m compileall -q /opt/nevexona-droid || true\n' > "$ROOT/DEBIAN/postinst"
+printf '#!/bin/sh\nset -e\nfind /opt/nevexona-droid -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true\n' > "$ROOT/DEBIAN/prerm"
+chmod 755 "$ROOT/DEBIAN/postinst" "$ROOT/DEBIAN/prerm"
 mkdir -p dist
 dpkg-deb --root-owner-group --build "$ROOT" "dist/nevexona-droid_${VER}_all.deb"

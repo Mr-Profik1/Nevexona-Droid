@@ -5,9 +5,10 @@ Linux-приложение для запуска Android через Waydroid и 
 ## Установка (Debian 13 / Ubuntu / Mint)
 1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts).
 2. `sudo apt install ./nevexona-droid_*_all.deb`
-3. `sudo apt install python3-pyside6.qtwidgets adb`
+3. `sudo apt install adb` (PySide6 подтянется как зависимость пакета)
 4. Установите Waydroid: https://docs.waydro.id/usage/install-on-desktops
 5. Запустите из меню приложений или командой `nevexona-droid`, затем Android Engine → «Инициализировать Android».
+6. На Dashboard: Start Android → Show Android. При первом ADB-подключении подтвердите диалог отладки в окне Android.
 
 Из исходников: `./install.sh` (спросит согласие перед установкой системных пакетов). Удаление: `./uninstall.sh`.
 

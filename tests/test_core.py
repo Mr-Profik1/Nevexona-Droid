@@ -81,6 +81,34 @@ def test_settings(tmp_path):
     assert s.recent() == ["a.b", "c.d"]
 
 
+def test_settings_from_other_thread(tmp_path):
+    import threading
+    s = Settings(tmp_path / "t.db")
+    out = []
+    t = threading.Thread(target=lambda: out.append(s.get("adb_host")))
+    t.start(); t.join()
+    assert out == ["192.168.240.112:5555"]
+
+
+def test_engine_frozen_container_is_running():
+    w = lambda n: "/usr/bin/waydroid"
+    assert engine.get_state(fake("Session:\tRUNNING\nContainer:\tFROZEN"), w) == engine.State.RUNNING
+
+
+def test_show_ui_command():
+    assert engine.show_ui_command() == ["waydroid", "show-full-ui"]
+
+
+def test_adb_state():
+    def r(out="", err="", ok=True):
+        return lambda args, timeout=30: Result(ok, 0 if ok else 1, out, err)
+    assert adb.Adb(runner=r("device\n")).state() == "device"
+    assert adb.Adb(runner=r(err="error: device unauthorized.", ok=False)).state() == "unauthorized"
+    assert adb.Adb(runner=r(err="error: device offline", ok=False)).state() == "offline"
+    assert adb.Adb(runner=r(err="error: no devices", ok=False)).state() == "unreachable"
+    assert not adb.Adb(runner=r(err="error: device unauthorized.", ok=False)).is_online()
+
+
 def test_format_report():
     text = d.format_report(rep(has_adb=False))
     assert "Partially Compatible" in text and "adb" in text.lower()

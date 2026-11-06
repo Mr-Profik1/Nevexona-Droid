@@ -49,9 +49,20 @@ class Adb:
         return res.ok and ("connected" in res.out and "unable" not in res.out
                            and "failed" not in res.out)
 
-    def is_online(self):
+    def state(self):
+        """device / unauthorized / offline / unreachable."""
         res = self._adb("get-state", timeout=10)
-        return res.ok and res.out.strip() == "device"
+        if res.ok:
+            return res.out.strip() or "unreachable"
+        text = (res.out + res.err).lower()
+        if "unauthorized" in text:
+            return "unauthorized"
+        if "offline" in text:
+            return "offline"
+        return "unreachable"
+
+    def is_online(self):
+        return self.state() == "device"
 
     def install(self, apk):
         validate_apk(apk)
