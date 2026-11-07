@@ -1,6 +1,6 @@
-# NEVEXONA Droid
+# NEVEXONA Droid — Android Apps On Linux
 
-Linux-приложение для запуска Android через Waydroid и ADB: менеджер APK, каталог F-Droid, проверка совместимости.
+Linux-приложение для запуска Android-приложений через Waydroid и ADB: менеджер APK, каталог F-Droid, проверка совместимости системы. Waydroid ставится отдельно (см. установку ниже).
 
 ## Установка (Debian 13 / Ubuntu / Mint)
 1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts).
