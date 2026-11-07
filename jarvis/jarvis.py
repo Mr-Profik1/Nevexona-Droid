@@ -30,7 +30,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 CONFIG_DIR = os.path.expanduser("~/.config/jarvis")
 CONFIG = os.path.join(CONFIG_DIR, "config")
 MACROS = os.path.join(CONFIG_DIR, "macros.json")
@@ -57,9 +57,13 @@ def load_config():
 
 
 load_config()
-BASE_URL = os.environ.get("JARVIS_BASE_URL", "").rstrip("/")
+DEFAULT_URL = "https://openrouter.ai/api/v1"
+DEFAULT_MODEL = "openrouter/free"  # сам выбирает любую доступную бесплатную модель
+DEFAULT_VISION_MODEL = "nvidia/nemotron-3.5-super-vl:free"  # бесплатная, понимает скриншоты
+BASE_URL = (os.environ.get("JARVIS_BASE_URL") or DEFAULT_URL).rstrip("/")
 API_KEY = os.environ.get("JARVIS_API_KEY", "")
-MODEL = os.environ.get("JARVIS_MODEL", "")
+MODEL = os.environ.get("JARVIS_MODEL") or DEFAULT_MODEL
+VISION_MODEL = os.environ.get("JARVIS_VISION_MODEL") or DEFAULT_VISION_MODEL
 AUTO = os.environ.get("JARVIS_AUTO") == "1" or "--auto" in sys.argv
 MAX_STEPS = 30 if AUTO else 12
 MAX_OUT = 3000
@@ -578,8 +582,14 @@ def ai_ready():
     return bool(BASE_URL and API_KEY and MODEL)
 
 
+def model_for(messages):
+    """Запросы со скриншотом идут в модель, которая видит изображения; остальные в обычную."""
+    has_image = any(isinstance(m.get("content"), list) for m in messages)
+    return VISION_MODEL if has_image and VISION_MODEL else MODEL
+
+
 def chat(messages):
-    body = json.dumps({"model": MODEL, "messages": messages, "temperature": 0.2}).encode()
+    body = json.dumps({"model": model_for(messages), "messages": messages, "temperature": 0.2}).encode()
     req = urllib.request.Request(
         BASE_URL + "/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + API_KEY})
@@ -647,9 +657,13 @@ def ask_ai(history, task):
         try:
             reply = chat([{"role": "system", "content": SYSTEM}] + history[-20:])
         except urllib.error.HTTPError as e:
-            say(f"Ошибка сервиса ИИ: {e.code}. Проверьте ключ, модель и адрес (команда «настройка»).")
-            if has_image:
-                print("  В запросе был скриншот: модель должна уметь работать с изображениями (vision).")
+            hints = {401: "Ключ не подошёл: проверьте его в настройках.",
+                     402: "На счёте OpenRouter нет средств для этой модели. Выберите бесплатную (с :free).",
+                     404: "Модель недоступна или не существует: смените её в настройках.",
+                     429: "Лимит бесплатной модели (около 20 запросов в минуту и 200 в день). Подождите минуту и повторите."}
+            say(f"Ошибка сервиса ИИ: {e.code}. " + hints.get(e.code, "Проверьте ключ, модель и адрес (команда «настройка»)."))
+            if has_image and e.code not in hints:
+                print(f"  В запросе был скриншот: модель {VISION_MODEL} должна уметь работать с изображениями.")
             return True
         except Exception:  # noqa: BLE001  нет сети, таймаут и т.п.
             history.pop()
@@ -680,30 +694,36 @@ def ask_ai(history, task):
 
 
 def wizard():
-    global BASE_URL, API_KEY, MODEL
-    print("Настройка ИИ. Нужен сервис с OpenAI-совместимым API (см. jarvis/README.md).")
-    url = input("Адрес API (например https://openrouter.ai/api/v1): ").strip()
-    key = input("Ключ: ").strip()
-    model = input("Название модели: ").strip()
-    if not (url and key and model):
-        say("Отменено, нужны все три значения.")
+    print("Настройка ИИ (OpenRouter по умолчанию). Пустой ввод оставляет значение в скобках.")
+    url = input(f"Адрес API [{BASE_URL}]: ").strip() or BASE_URL
+    key = getpass.getpass("Ключ (ввод скрыт): ").strip() or API_KEY
+    model = input(f"Модель [{MODEL}]: ").strip() or MODEL
+    vision = input(f"Модель для экрана [{VISION_MODEL}]: ").strip() or VISION_MODEL
+    if not key:
+        say("Отменено: нужен ключ.")
         return
-    save_config(url, key, model)
+    try:
+        save_config(url, key, model, vision)
+    except ValueError as e:
+        say(str(e))
+        return
     say("Сохранено.")
 
 
-def save_config(url, key, model):
-    """Сохраняет адрес, ключ и модель в ~/.config/jarvis/config (доступ только владельцу)."""
-    global BASE_URL, API_KEY, MODEL
-    for v in (url, key, model):
+def save_config(url, key, model, vision=None):
+    """Сохраняет адрес, ключ и модели в ~/.config/jarvis/config (доступ только владельцу)."""
+    global BASE_URL, API_KEY, MODEL, VISION_MODEL
+    vision = vision or DEFAULT_VISION_MODEL
+    for v in (url, key, model, vision):
         if any(c in v for c in '"\n\r'):
-            raise ValueError("в адресе, ключе и модели не должно быть кавычек и переводов строки")
+            raise ValueError("в адресе, ключе и моделях не должно быть кавычек и переводов строки")
     os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
     fd = os.open(CONFIG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(f'JARVIS_BASE_URL="{url}"\nJARVIS_API_KEY="{key}"\nJARVIS_MODEL="{model}"\n')
+        f.write(f'JARVIS_BASE_URL="{url}"\nJARVIS_API_KEY="{key}"\nJARVIS_MODEL="{model}"\n'
+                f'JARVIS_VISION_MODEL="{vision}"\n')
     os.chmod(CONFIG, 0o600)
-    BASE_URL, API_KEY, MODEL = url.rstrip("/"), key, model
+    BASE_URL, API_KEY, MODEL, VISION_MODEL = url.rstrip("/"), key, model, vision
 
 
 def process(text, history):

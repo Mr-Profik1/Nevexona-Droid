@@ -36,9 +36,9 @@ chmod +x "$BIN/jarvis" "$BIN/jarvis-cli"
 
 if [ -n "${JARVIS_API_KEY:-}" ]; then
   umask 077
-  printf 'JARVIS_BASE_URL="%s"\nJARVIS_API_KEY="%s"\nJARVIS_MODEL="%s"\n' \
+  printf 'JARVIS_BASE_URL="%s"\nJARVIS_API_KEY="%s"\nJARVIS_MODEL="%s"\nJARVIS_VISION_MODEL="%s"\n' \
     "${JARVIS_BASE_URL:-https://openrouter.ai/api/v1}" "$JARVIS_API_KEY" \
-    "${JARVIS_MODEL:-nvidia/nemotron-3.5-super-vl:free}" > "$CONF/config"
+    "${JARVIS_MODEL:-openrouter/free}" "${JARVIS_VISION_MODEL:-nvidia/nemotron-3.5-super-vl:free}" > "$CONF/config"
   chmod 600 "$CONF/config"
   echo "Настройки ИИ сохранены в $CONF/config"
 fi

@@ -236,8 +236,8 @@ class Handler(BaseHTTPRequestHandler):
                 last, busy = APP.next_id - 1, APP.busy
             return self.send_json(200, {"events": events, "last": last, "busy": busy})
         if url.path == "/api/settings":
-            return self.send_json(200, {"url": j.BASE_URL, "model": j.MODEL, "has_key": bool(j.API_KEY),
-                                        "models": PRESET_MODELS})
+            return self.send_json(200, {"url": j.BASE_URL, "model": j.MODEL, "vision": j.VISION_MODEL,
+                                        "has_key": bool(j.API_KEY), "models": PRESET_MODELS})
         return self.send_json(404, {"error": "не найдено"})
 
     # ---- POST ----
@@ -315,13 +315,14 @@ class Handler(BaseHTTPRequestHandler):
             emit("info", text="Разговор очищен.")
             return self.send_json(200, {"ok": True})
         if path == "/api/settings":
-            url = str(body.get("url", "")).strip()
+            url = str(body.get("url", "")).strip() or j.DEFAULT_URL
             key = str(body.get("key", "")).strip() or j.API_KEY
-            model = str(body.get("model", "")).strip()
-            if not re.match(r"https?://\S+$", url) or not key or not model:
-                return self.send_json(400, {"error": "нужны адрес (http или https), ключ и модель"})
+            model = str(body.get("model", "")).strip() or j.DEFAULT_MODEL
+            vision = str(body.get("vision", "")).strip() or j.DEFAULT_VISION_MODEL
+            if not re.match(r"https?://\S+$", url) or not key:
+                return self.send_json(400, {"error": "нужен ключ и адрес (http или https)"})
             try:
-                j.save_config(url, key, model)
+                j.save_config(url, key, model, vision)
             except (ValueError, OSError) as e:
                 return self.send_json(400, {"error": str(e)})
             return self.send_json(200, {"ok": True, "ai_ready": j.ai_ready()})
@@ -441,7 +442,7 @@ def main():
     if j.ai_ready():
         emit("say", text="Привет. Что нужно сделать?")
     else:
-        emit("say", text="Привет. ИИ не настроен, работаю в простом режиме. Нажмите «Настройки», чтобы подключить ИИ.")
+        emit("say", text="Привет. Чтобы подключить ИИ, вставьте ключ OpenRouter в окне «Настройки». Остальное уже заполнено.")
     url = f"http://127.0.0.1:{APP.port}/?t={APP.token}"
     if not open_window(url):
         sys.stderr.write(f"Не нашёл браузер. Откройте эту ссылку (одноразовая): {url}\n")
@@ -574,7 +575,9 @@ input:focus,select:focus{border-color:var(--accent)}
   </select>
   <label>Адрес API</label><input id="surl" autocomplete="off">
   <label>Ключ <span id="skeyhint"></span></label><input id="skey" type="password" autocomplete="off">
-  <label>Модель</label><input id="smodel" list="models" autocomplete="off"><datalist id="models"></datalist>
+  <label>Модель для чата (openrouter/free сам выбирает бесплатную)</label><input id="smodel" list="models" autocomplete="off">
+  <label>Модель для действий на экране (должна видеть изображения)</label><input id="svision" list="models" autocomplete="off">
+  <datalist id="models"></datalist>
   <div class="err" id="serr"></div>
   <div class="btns"><button class="btn" data-close="mset">Закрыть</button><button class="btn primary" id="ssave">Сохранить</button></div>
 </div></div>
@@ -697,14 +700,14 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ ["mset","mpin"].f
 async function loadSettings(){
   $("serr").textContent=""; $("skey").value="";
   const {data}=await api("/api/settings");
-  $("surl").value=data.url||"https://openrouter.ai/api/v1"; $("smodel").value=data.model||"";
+  $("surl").value=data.url||"https://openrouter.ai/api/v1"; $("smodel").value=data.model||""; $("svision").value=data.vision||"";
   $("skeyhint").textContent=data.has_key?"(сохранён, оставьте пустым, чтобы не менять)":"";
   const dl=$("models"); dl.textContent=""; (data.models||[]).forEach(m=>{ const o=el("option"); o.value=m; dl.append(o); });
   const p=$("spreset"); p.value=[...p.options].some(o=>o.value===$("surl").value)?$("surl").value:"";
 }
 $("spreset").onchange=()=>{ if($("spreset").value) $("surl").value=$("spreset").value; else { $("surl").value=""; $("surl").focus(); } };
 $("ssave").onclick=async()=>{
-  const {status,data}=await api("/api/settings",{url:$("surl").value,key:$("skey").value,model:$("smodel").value});
+  const {status,data}=await api("/api/settings",{url:$("surl").value,key:$("skey").value,model:$("smodel").value,vision:$("svision").value});
   if(status===200){ closeModal("mset"); addInfo(data.ai_ready?"ИИ подключён.":"Сохранено."); refreshState(); }
   else $("serr").textContent=data.error||"Не сохранилось.";
 };
@@ -733,6 +736,7 @@ async function refreshState(){
   if(!st.unlocked){ $("lock").classList.add("show"); setTimeout(()=>$("lpin").focus(),50);
     if(st.lock_left) $("lerr").textContent="Слишком много попыток. Подождите "+st.lock_left+" с."; return; }
   $("lock").classList.remove("show"); paintHeader();
+  if(!st.ai_ready && !window.setOpened){ window.setOpened=true; openModal("mset"); }
   if(st.screen_problem && !window.spNoted){ window.spNoted=true; addInfo("Управление экраном пока недоступно: "+st.screen_problem); }
   poll();
 }

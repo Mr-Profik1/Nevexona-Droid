@@ -282,7 +282,7 @@ class AgentLoopTests(ScreenBase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.j.BASE_URL = f"http://127.0.0.1:{self.server.server_address[1]}"
-        self.j.API_KEY, self.j.MODEL = "test", "test-model"
+        self.j.API_KEY, self.j.MODEL, self.j.VISION_MODEL = "test", "test-model", "vision-model"
         self.j.AUTO = True
 
     def test_shot_click_done(self):
@@ -306,6 +306,9 @@ class AgentLoopTests(ScreenBase):
         images = [p for m in last if isinstance(m["content"], list) for p in m["content"] if p["type"] == "image_url"]
         self.assertEqual(len(images), 1)  # старый скриншот убран
         self.assertEqual(self.j.SCREEN["scale"], 200 / 128)
+        # без скриншота в запросе модель для чата, со скриншотом модель для экрана
+        self.assertEqual([r["model"] for r in FakeAPI.requests],
+                         ["test-model", "vision-model", "vision-model", "vision-model"])
 
     def test_run_command_still_works(self):
         FakeAPI.replies = ['{"say":"пишу","run":"echo hello-jarvis"}', '{"say":"готово","run":""}']
@@ -314,9 +317,15 @@ class AgentLoopTests(ScreenBase):
         self.assertIn("hello-jarvis", history[-2]["content"])
 
     def test_http_error_message(self):
+        self._boom(401, "401", "Ключ не подошёл")
+
+    def test_rate_limit_message(self):
+        self._boom(429, "429", "Лимит бесплатной модели")
+
+    def _boom(self, code, *expected):
         class Boom(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802
-                self.send_response(401)
+                self.send_response(code)
                 self.end_headers()
 
             def log_message(self, *args):
@@ -329,7 +338,8 @@ class AgentLoopTests(ScreenBase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertTrue(self.j.ask_ai([], "привет"))
-        self.assertIn("401", buf.getvalue())
+        for text in expected:
+            self.assertIn(text, buf.getvalue())
 
 
 if __name__ == "__main__":

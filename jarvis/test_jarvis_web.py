@@ -24,6 +24,21 @@ j = web.j
 
 
 class CoreExtraTests(Base):
+    def test_model_for(self):
+        self.j.MODEL, self.j.VISION_MODEL = "chat-m", "vision-m"
+        text_only = [{"role": "user", "content": "привет"}]
+        with_image = text_only + [{"role": "user", "content": [{"type": "image_url"}]}]
+        self.assertEqual(self.j.model_for(text_only), "chat-m")
+        self.assertEqual(self.j.model_for(with_image), "vision-m")
+        self.j.VISION_MODEL = ""
+        self.assertEqual(self.j.model_for(with_image), "chat-m")
+
+    def test_defaults_without_config(self):
+        self.assertEqual(self.j.DEFAULT_MODEL, "openrouter/free")
+        self.assertEqual(self.j.DEFAULT_VISION_MODEL, "nvidia/nemotron-3.5-super-vl:free")
+        self.assertTrue(self.j.BASE_URL.startswith("https://openrouter.ai"))
+        self.assertFalse(self.j.ai_ready())  # без ключа ИИ не включается
+
     def test_try_pin_states(self):
         self.j.save_pin("1234")
         self.assertEqual(self.j.try_pin("x")[0], "bad")
@@ -387,11 +402,22 @@ class SettingsTests(WebBase):
         self.assertNotIn("sk-test-123", json.dumps(raw))
         self.assertEqual(stat.S_IMODE(os.stat(j.CONFIG).st_mode), 0o600)
         self.assertEqual(self.call("POST", "/api/settings", {**body, "url": "ftp://x"}, cookie=cookie)[0], 400)
-        self.assertEqual(self.call("POST", "/api/settings", {**body, "model": ""}, cookie=cookie)[0], 400)
+        self.assertEqual(self.call("POST", "/api/settings", {**body, "key": ""}, cookie=cookie)[0], 200)  # прежний ключ
         status, _, _ = self.call("POST", "/api/settings", {**body, "key": "", "model": "other/model"}, cookie=cookie)
         self.assertEqual(status, 200)  # пустой ключ значит «оставить прежний»
         self.assertIn("sk-test-123", Path(j.CONFIG).read_text(encoding="utf-8"))
         self.assertIn("other/model", Path(j.CONFIG).read_text(encoding="utf-8"))
+
+    def test_key_only_uses_defaults(self):
+        cookie = self.login()
+        status, _, data = self.call("POST", "/api/settings", {"key": "sk-only-key"}, cookie=cookie)
+        self.assertEqual((status, data["ai_ready"]), (200, True))
+        text = Path(j.CONFIG).read_text(encoding="utf-8")
+        self.assertIn('JARVIS_BASE_URL="https://openrouter.ai/api/v1"', text)
+        self.assertIn('JARVIS_MODEL="openrouter/free"', text)
+        self.assertIn('JARVIS_VISION_MODEL="nvidia/nemotron-3.5-super-vl:free"', text)
+        got = self.call("GET", "/api/settings", cookie=cookie)[2]
+        self.assertEqual((got["model"], got["vision"]), ("openrouter/free", "nvidia/nemotron-3.5-super-vl:free"))
 
     def test_settings_rejects_injection(self):
         cookie = self.login()
