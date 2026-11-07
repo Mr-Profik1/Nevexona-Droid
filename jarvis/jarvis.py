@@ -2,25 +2,41 @@
 """Джарвис: помощник для Linux. Вы пишете, он отвечает голосом и выполняет задачи.
 
 Два режима, переключаются сами:
-  с интернетом: ИИ (любой сервис с OpenAI-совместимым API) сам решает, какие команды выполнить;
-  без интернета (или без ключа): простые заданные команды, напишите "помощь".
+  с интернетом: ИИ (любой сервис с OpenAI-совместимым API) сам решает, какие команды выполнить
+    и что сделать на экране (X11: скриншот, клик, ввод, клавиши; нужны xdotool и scrot);
+  без интернета (или без ключа): простые заданные команды, напишите "помощь" или "help".
+Защита: команда "пин" задаёт PIN, он спрашивается при каждом запуске.
 Свои короткие команды (макросы): "макрос rt = команда", список: "макросы".
-Режим полного разрешения: JARVIS_AUTO=1 или флаг --auto (опасные команды всё равно спрашивают).
+Режим полного разрешения: JARVIS_AUTO=1 или флаг --auto, только с PIN (опасные команды всё равно спрашивают).
 Озвучка: sudo apt install espeak-ng
 """
+import base64
 import datetime
+import getpass
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
+import struct
 import subprocess
 import sys
+import tempfile
+import time
 import urllib.error
 import urllib.request
 
-CONFIG = os.path.expanduser("~/.config/jarvis/config")
-MACROS = os.path.expanduser("~/.config/jarvis/macros.json")
+CONFIG_DIR = os.path.expanduser("~/.config/jarvis")
+CONFIG = os.path.join(CONFIG_DIR, "config")
+MACROS = os.path.join(CONFIG_DIR, "macros.json")
+PIN_FILE = os.path.join(CONFIG_DIR, "pin")
+LOCK_FILE = os.path.join(CONFIG_DIR, "pin.lock")
 LOG = os.path.expanduser("~/.jarvis_log")
+PIN_ROUNDS = 200_000
+PIN_TRIES = 3
+PIN_LOCK_SECONDS = 60
 
 
 def load_config():
@@ -40,20 +56,31 @@ BASE_URL = os.environ.get("JARVIS_BASE_URL", "").rstrip("/")
 API_KEY = os.environ.get("JARVIS_API_KEY", "")
 MODEL = os.environ.get("JARVIS_MODEL", "")
 AUTO = os.environ.get("JARVIS_AUTO") == "1" or "--auto" in sys.argv
-MAX_STEPS = 15 if AUTO else 6
+MAX_STEPS = 30 if AUTO else 12
 MAX_OUT = 3000
+SHOT_MAX_WIDTH = 1280
 CMD_TIMEOUT = 300
 DANGEROUS = re.compile(
     r"\brm\s+-[a-zA-Z]*[rf]|\bmkfs|\bdd\s+.*of=/dev/|:\(\)\s*\{|>\s*/dev/sd|\bchmod\s+-R\s+[0-7]+\s+/\s*$"
     r"|\bshred\b|\bwipefs\b|\bfdisk\b|\bparted\b|\bpoweroff\b|\breboot\b|\bshutdown\b|\bpasswd\b|\buserdel\b")
 
 SYSTEM = (
-    "Ты голосовой помощник Джарвис на компьютере с Linux Mint (Cinnamon, X11). "
-    "Пользователь даёт задачи на русском. Ты можешь выполнять команды bash. "
+    "Ты помощник Джарвис на компьютере с Linux (X11). "
+    "Пользователь даёт задачи на русском или английском, отвечай на языке пользователя. "
+    "Ты можешь выполнять команды bash и управлять экраном. "
     "Отвечай СТРОГО одним JSON-объектом без пояснений вокруг: "
-    '{"say": "короткая фраза для озвучки", "run": "одна команда bash или пустая строка"}. '
+    '{"say": "короткая фраза", "run": "одна команда bash или пустая строка", "screen": null или действие}. '
+    "За один ответ делай одно: или run, или screen. "
+    "Действие screen это объект: "
+    '{"do":"shot"} сделать скриншот и получить его; '
+    '{"do":"click","x":100,"y":200} (также double_click, right_click, move); '
+    '{"do":"type","text":"текст"} напечатать текст; '
+    '{"do":"key","keys":"ctrl+l"} нажать клавиши (формат xdotool: Return, ctrl+t, alt+F4); '
+    '{"do":"scroll","dy":-3} прокрутка (минус вверх, плюс вниз). '
+    "Координаты x,y считай по последнему скриншоту, который ты получил. "
+    "Перед кликом по экрану сначала сделай shot и посмотри результат, после действия снова shot, чтобы проверить итог. "
     "Если нужно выполнить команду, поставь её в run. Ты получишь её вывод и продолжишь. "
-    "Когда задача выполнена или команда не нужна, оставь run пустым и скажи итог в say. "
+    "Когда задача выполнена или действий больше не нужно, оставь run пустым, screen null и скажи итог в say. "
     "Графические программы запускай так: setsid -f ПРОГРАММА >/dev/null 2>&1. "
     "sudo можно использовать, когда это нужно (пароль уже введён), для apt всегда добавляй -y. "
     "Чтобы прочитать сайт, используй curl -sL URL | sed 's/<[^>]*>//g' | tr -s ' \\n' | head -c 3000. "
@@ -67,8 +94,16 @@ APPS = {
     "файлы": ["nemo"], "калькулятор": ["gnome-calculator"], "телеграм": ["telegram-desktop"],
     "telegram": ["telegram-desktop"], "steam": ["steam"], "nevexona": ["nevexona-droid"],
     "droid": ["nevexona-droid"],
+    "browser": ["firefox"], "terminal": ["x-terminal-emulator"], "files": ["nemo"],
+    "calculator": ["gnome-calculator"],
 }
-QUICK = {"время", "дата", "помощь", "память", "громче", "тише", "без звука", "макросы"}
+QUICK = {"время", "дата", "помощь", "память", "громче", "тише", "без звука", "макросы",
+         "time", "date", "help", "memory", "louder", "quieter", "mute", "macros"}
+# английские команды приводятся к русским
+EN_ALIASES = {"louder": "громче", "quieter": "тише", "mute": "без звука", "memory": "память",
+              "macros": "макросы", "shutdown": "выключи компьютер", "reboot": "перезагрузи компьютер"}
+EN_PREFIXES = (("open ", "открой "), ("launch ", "запусти "), ("search ", "найди "),
+               ("find ", "найди "), ("volume ", "громкость "), ("run ", "выполни "))
 
 HELP = """Простые команды (работают и без интернета):
   время, дата
@@ -81,8 +116,11 @@ HELP = """Простые команды (работают и без интерн
   макрос <имя> = <команда>    своя короткая команда, например: макрос rt = setsid -f firefox
   макросы                     список; "удали макрос <имя>"
   настройка                   подключить ИИ (адрес, ключ, модель)
+  пин                         задать или сменить PIN; "пин удалить" снять защиту
   помощь, выход
-С интернетом и настроенным ИИ любые другие фразы выполняет ИИ."""
+Английские версии тоже работают: time, date, open browser, search ..., volume 50, louder, quieter, mute, memory, run ...
+С интернетом и настроенным ИИ любые другие фразы выполняет ИИ, в том числе управляет экраном
+(скриншот, клики, ввод текста, клавиши; только X11, нужны xdotool и scrot или imagemagick)."""
 
 
 def say(text):
@@ -133,15 +171,28 @@ def volume(arg):
     say("Готово.")
 
 
+def to_ru(text):
+    """Приводит английские простые команды к русским."""
+    t = text.strip()
+    low = t.lower()
+    if low in EN_ALIASES:
+        return EN_ALIASES[low]
+    for en, ru in EN_PREFIXES:
+        if low.startswith(en):
+            return ru + t[len(en):]
+    return t
+
+
 def simple(text):
     """Простые команды. Возвращает True, если команда распознана."""
+    text = to_ru(text)
     t = text.strip().lower()
     if t in ("помощь", "help", "?"):
         print(HELP)
         say("Список команд на экране.")
     elif "время" in t or t == "time":
         say(datetime.datetime.now().strftime("Сейчас %H:%M"))
-    elif "дата" in t or "какое число" in t:
+    elif "дата" in t or "какое число" in t or t == "date":
         say(datetime.datetime.now().strftime("Сегодня %d.%m.%Y"))
     elif t.startswith(("открой ", "запусти ")):
         open_app(t.split(" ", 1)[1])
@@ -224,6 +275,279 @@ def macro_commands(text):
     return False
 
 
+# ---------- PIN ----------
+
+def pin_set_up():
+    return os.path.exists(PIN_FILE)
+
+
+def hash_pin(pin, salt=None, rounds=PIN_ROUNDS):
+    salt = salt or secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, rounds)
+    return f"pbkdf2${rounds}${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+
+
+def verify_pin(pin, stored):
+    try:
+        _, rounds, salt, dk = stored.strip().split("$")
+        calc = hashlib.pbkdf2_hmac("sha256", pin.encode(), base64.b64decode(salt), int(rounds))
+        return hmac.compare_digest(calc, base64.b64decode(dk))
+    except ValueError:
+        return False
+
+
+def save_pin(pin):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    fd = os.open(PIN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(hash_pin(pin) + "\n")
+
+
+def check_pin(pin):
+    try:
+        with open(PIN_FILE, encoding="utf-8") as f:
+            return verify_pin(pin, f.read())
+    except OSError:
+        return False
+
+
+def lock_left():
+    """Сколько секунд ещё действует блокировка после неверных попыток."""
+    try:
+        with open(LOCK_FILE, encoding="utf-8") as f:
+            return max(0, int(float(f.read().strip()) - time.time()))
+    except (OSError, ValueError):
+        return 0
+
+
+def unlock():
+    """Спрашивает PIN при старте. True, если можно работать."""
+    if not pin_set_up():
+        return True
+    left = lock_left()
+    if left:
+        print(f"Слишком много неверных попыток. Подождите {left} с.")
+        return False
+    for _ in range(PIN_TRIES):
+        if check_pin(getpass.getpass("PIN: ")):
+            try:
+                os.remove(LOCK_FILE)
+            except OSError:
+                pass
+            return True
+        print("Неверный PIN.")
+        time.sleep(1)
+    try:
+        with open(LOCK_FILE, "w", encoding="utf-8") as f:
+            f.write(str(time.time() + PIN_LOCK_SECONDS))
+    except OSError:
+        pass
+    print(f"Доступ закрыт на {PIN_LOCK_SECONDS} с.")
+    return False
+
+
+def pin_command(text):
+    """Команды «пин» и «пин удалить». Возвращает True, если фраза была про PIN."""
+    low = text.strip().lower()
+    if low not in ("пин", "pin", "пин удалить", "pin remove"):
+        return False
+    remove = low.endswith(("удалить", "remove"))
+    if remove and not pin_set_up():
+        say("PIN и так не задан.")
+        return True
+    if pin_set_up() and not check_pin(getpass.getpass("Текущий PIN: ")):
+        say("Неверный PIN.")
+        return True
+    if remove:
+        try:
+            os.remove(PIN_FILE)
+        except OSError:
+            pass
+        say("PIN снят.")
+        return True
+    new = getpass.getpass("Новый PIN (минимум 4 символа): ")
+    if len(new) < 4 or new != getpass.getpass("Повторите PIN: "):
+        say("PIN не сохранён: он короче 4 символов или повтор не совпал.")
+        return True
+    save_pin(new)
+    say("PIN сохранён.")
+    return True
+
+
+# ---------- управление экраном (X11) ----------
+
+SCREEN = {"w": 0, "h": 0, "scale": 1.0, "always": False}
+SCREEN_DO = {"shot", "click", "double_click", "right_click", "move", "type", "key", "scroll"}
+
+
+def screen_problem():
+    """Причина, почему экран недоступен, или None, если всё готово."""
+    if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+        return "Сессия Wayland: xdotool в ней не работает. Войдите в сеанс X11."
+    if not os.environ.get("DISPLAY"):
+        return "Нет графического экрана (переменная DISPLAY пуста)."
+    if not shutil.which("xdotool"):
+        return "Не установлен xdotool: sudo apt install xdotool"
+    if not (shutil.which("scrot") or shutil.which("import")):
+        return "Нет программы для скриншотов: sudo apt install scrot"
+    return None
+
+
+def png_size(data):
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("это не PNG")
+    return struct.unpack(">II", data[16:24])
+
+
+def take_shot():
+    """Скриншот. Возвращает (png-байты, ширина, высота) того, что уйдёт ИИ; запоминает масштаб."""
+    d = tempfile.mkdtemp(prefix="jarvis-")
+    path = os.path.join(d, "s.png")
+    try:
+        cmd = ["scrot", path] if shutil.which("scrot") else ["import", "-window", "root", path]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if p.returncode != 0 or not os.path.exists(path):
+            raise RuntimeError((p.stderr or "скриншот не получился").strip()[:200])
+        with open(path, "rb") as f:
+            real_w, real_h = png_size(f.read(24))
+        sent = path
+        if real_w > SHOT_MAX_WIDTH and shutil.which("convert"):
+            small = os.path.join(d, "small.png")
+            q = subprocess.run(["convert", path, "-resize", f"{SHOT_MAX_WIDTH}x", small],
+                               capture_output=True, timeout=30)
+            if q.returncode == 0 and os.path.exists(small):
+                sent = small
+        with open(sent, "rb") as f:
+            data = f.read()
+        w, h = png_size(data)
+        SCREEN.update(w=w, h=h, scale=real_w / w)
+        return data, w, h
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def to_real(x, y):
+    """Координаты со скриншота (какой видел ИИ) в настоящие координаты экрана."""
+    if not SCREEN["w"]:
+        raise ValueError("сначала нужен скриншот")
+    x, y = int(x), int(y)
+    if not (0 <= x < SCREEN["w"] and 0 <= y < SCREEN["h"]):
+        raise ValueError(f"координаты вне экрана (скриншот {SCREEN['w']}x{SCREEN['h']})")
+    return round(x * SCREEN["scale"]), round(y * SCREEN["scale"])
+
+
+def xdo(*args):
+    p = subprocess.run(["xdotool", *map(str, args)], capture_output=True, text=True, timeout=20)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or "xdotool вернул ошибку").strip()[:200])
+
+
+def describe_action(act, hide_text=False):
+    kind = act.get("do")
+    if kind in ("click", "double_click", "right_click", "move"):
+        return f"{kind} ({act.get('x')},{act.get('y')})"
+    if kind == "type":
+        text = str(act.get("text", ""))
+        return f"type ({len(text)} символов)" if hide_text else f"напечатать «{text}»"
+    if kind == "key":
+        return f"клавиши {act.get('keys')}"
+    if kind == "scroll":
+        return f"прокрутка {act.get('dy')}"
+    return str(kind)
+
+
+def screen_do(act):
+    """Выполняет действие над экраном (кроме shot). Возвращает текст результата."""
+    kind = str(act.get("do", "")).lower()
+    try:
+        if kind in ("click", "double_click", "right_click", "move"):
+            x, y = to_real(act.get("x"), act.get("y"))
+            xdo("mousemove", x, y)
+            if kind == "click":
+                xdo("click", 1)
+            elif kind == "double_click":
+                xdo("click", "--repeat", 2, "--delay", 80, 1)
+            elif kind == "right_click":
+                xdo("click", 3)
+        elif kind == "type":
+            text = str(act.get("text", ""))
+            if not text:
+                return "ошибка: пустой текст"
+            xdo("type", "--delay", 20, "--", text)
+        elif kind == "key":
+            keys = str(act.get("keys", "")).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_+\- ]+", keys):
+                return "ошибка: неверные клавиши"
+            xdo("key", *keys.split())
+        elif kind == "scroll":
+            dy = int(act.get("dy", 0))
+            if dy == 0:
+                return "ошибка: dy равно нулю"
+            xdo("click", "--repeat", min(abs(dy), 20), 5 if dy > 0 else 4)
+        else:
+            return "ошибка: неизвестное действие"
+    except (ValueError, TypeError, RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        return f"ошибка: {e}"
+    time.sleep(0.5)
+    return "Готово."
+
+
+def allow_screen(desc, danger=False):
+    if danger:
+        return confirm(f"  Опасно: {desc}. Выполнить?")
+    if AUTO or SCREEN["always"]:
+        return True
+    ans = input(f"  Экран: {desc}. Выполнить? [y/N/a=всегда в этой сессии] ").strip().lower()
+    if ans in ("a", "а", "в"):
+        SCREEN["always"] = True
+        return True
+    return ans in ("y", "д", "да")
+
+
+def strip_old_images(history):
+    """Оставляет в истории только последний скриншот, чтобы не раздувать запросы."""
+    last = max((i for i, m in enumerate(history) if isinstance(m["content"], list)), default=-1)
+    for i, m in enumerate(history):
+        if isinstance(m["content"], list) and i != last:
+            m["content"] = "[старый скриншот удалён]"
+
+
+def handle_screen(history, act):
+    """Выполняет действие над экраном, результат кладёт в историю. False, если пользователь отказал."""
+    problem = screen_problem()
+    if problem:
+        say(problem)
+        history.append({"role": "user", "content": "Экран недоступен: " + problem})
+        return True
+    kind = act["do"]
+    if kind == "shot":
+        desc, danger = "сделать скриншот и отправить его ИИ", False
+    else:
+        desc = describe_action(act)
+        danger = kind == "type" and bool(DANGEROUS.search(str(act.get("text", ""))))
+    if not allow_screen(desc, danger):
+        history.append({"role": "user", "content": "Пользователь отклонил действие."})
+        say("Отменено.")
+        return False
+    log_line("screen: " + ("shot" if kind == "shot" else describe_action(act, hide_text=True)))
+    if kind == "shot":
+        try:
+            data, w, h = take_shot()
+        except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as e:
+            print(f"  Скриншот не получился: {e}")
+            history.append({"role": "user", "content": f"Скриншот не получился: {e}"})
+            return True
+        history.append({"role": "user", "content": [
+            {"type": "text", "text": f"Скриншот {w}x{h}. Координаты x,y считай по нему."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(data).decode()}},
+        ]})
+        return True
+    out = screen_do(act)
+    print("  " + out)
+    history.append({"role": "user", "content": "Результат действия: " + out})
+    return True
+
+
 # ---------- ИИ ----------
 
 def ai_ready():
@@ -241,22 +565,34 @@ def chat(messages):
 
 
 def parse(reply):
+    """Разбирает ответ ИИ: (текст для озвучки, команда bash, действие над экраном или None)."""
     m = re.search(r"\{.*\}", reply, re.S)
     if m:
         try:
             obj = json.loads(m.group())
-            return str(obj.get("say", "")).strip(), str(obj.get("run", "") or "").strip()
+            if not isinstance(obj, dict):
+                return reply.strip(), "", None
+            act = obj.get("screen")
+            if not (isinstance(act, dict) and str(act.get("do", "")).lower() in SCREEN_DO):
+                act = None
+            else:
+                act = {**act, "do": str(act["do"]).lower()}
+            return str(obj.get("say", "") or "").strip(), str(obj.get("run", "") or "").strip(), act
         except json.JSONDecodeError:
             pass
-    return reply.strip(), ""
+    return reply.strip(), "", None
+
+
+def log_line(line):
+    try:
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
 
 
 def run_logged(cmd):
-    try:
-        with open(LOG, "a", encoding="utf-8") as f:
-            f.write(cmd + "\n")
-    except OSError:
-        pass
+    log_line(cmd)
     try:
         p = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=CMD_TIMEOUT)
         return f"[код {p.returncode}]\n{(p.stdout + p.stderr).strip()[:MAX_OUT]}"
@@ -268,18 +604,26 @@ def ask_ai(history, task):
     """Возвращает True, если ИИ ответил; False, если нет связи (нужен запасной режим)."""
     history.append({"role": "user", "content": task})
     for _ in range(MAX_STEPS):
+        strip_old_images(history)
+        has_image = any(isinstance(m["content"], list) for m in history[-20:])
         try:
             reply = chat([{"role": "system", "content": SYSTEM}] + history[-20:])
         except urllib.error.HTTPError as e:
             say(f"Ошибка сервиса ИИ: {e.code}. Проверьте ключ, модель и адрес (команда «настройка»).")
+            if has_image:
+                print("  В запросе был скриншот: модель должна уметь работать с изображениями (vision).")
             return True
         except Exception:  # noqa: BLE001  нет сети, таймаут и т.п.
             history.pop()
             return False
         history.append({"role": "assistant", "content": reply})
-        text, cmd = parse(reply)
+        text, cmd, act = parse(reply)
         if text:
             say(text)
+        if act:
+            if not handle_screen(history, act):
+                return True
+            continue
         if not cmd:
             return True
         print(f"  Команда: {cmd}")
@@ -315,6 +659,12 @@ def main():
     if os.name != "posix":
         print("Работает только на Linux.")
         return 1
+    if AUTO and not pin_set_up():
+        print("Режим полного разрешения работает только с PIN. Запустите jarvis без --auto, "
+              "напишите «пин», задайте PIN и запустите снова.")
+        return 1
+    if not unlock():
+        return 1
     if not shutil.which("espeak-ng"):
         print("Озвучка выключена. Включить: sudo apt install espeak-ng")
     if AUTO:
@@ -343,14 +693,22 @@ def main():
             continue
         if macro_commands(text):
             continue
-        if low == "настройка":
+        if pin_command(text):
+            continue
+        if low in ("настройка", "setup"):
             wizard()
             continue
         if not ai_ready() or low in QUICK:
             if not simple(text):
                 say("Не понял. Напишите «помощь».")
             continue
-        if not ask_ai(history, text):
+        try:
+            answered = ask_ai(history, text)
+        except KeyboardInterrupt:
+            print()
+            say("Остановлено.")
+            continue
+        if not answered:
             say("Нет связи с ИИ, перехожу в простой режим.")
             if not simple(text):
                 say("Не понял. Напишите «помощь».")

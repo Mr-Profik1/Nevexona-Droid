@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# Установка Джарвиса: команда `jarvis`, иконка на рабочем столе и в меню, горячая клавиша Alt+7 (Cinnamon).
+# Установка Джарвиса на Linux (Debian/Ubuntu/Mint): команда `jarvis`, значок, горячая клавиша Alt+7 (Cinnamon).
+# Ключ ИИ можно передать переменными: curl ... | JARVIS_API_KEY=... [JARVIS_MODEL=...] [JARVIS_BASE_URL=...] bash
 set -euo pipefail
 BASE=https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis
 DIR="$HOME/.local/share/jarvis"
 BIN="$HOME/.local/bin"
-mkdir -p "$DIR" "$BIN" "$HOME/.local/share/applications"
+CONF="$HOME/.config/jarvis"
+mkdir -p "$DIR" "$BIN" "$CONF" "$HOME/.local/share/applications"
 
-sudo apt-get install -y espeak-ng || echo "Не удалось поставить espeak-ng, голоса не будет."
+if command -v apt-get >/dev/null; then
+  # python3 и curl обязательны; espeak-ng (голос), xdotool и scrot (управление экраном) по желанию
+  sudo apt-get install -y python3 curl || { echo "Не удалось поставить python3 и curl."; exit 1; }
+  for p in espeak-ng xdotool scrot imagemagick; do
+    sudo apt-get install -y "$p" || echo "Не удалось поставить $p (голос или управление экраном могут не работать)."
+  done
+else
+  echo "apt-get не найден: поставьте вручную python3, curl, espeak-ng, xdotool, scrot."
+fi
 
 src="$(dirname "$0")/jarvis.py"
 if [ -f "$src" ]; then cp "$src" "$DIR/jarvis.py"; else curl -fsSL "$BASE/jarvis.py" -o "$DIR/jarvis.py"; fi
@@ -17,11 +27,20 @@ exec python3 "$DIR/jarvis.py" "\$@"
 EOF
 chmod +x "$BIN/jarvis"
 
+if [ -n "${JARVIS_API_KEY:-}" ]; then
+  umask 077
+  printf 'JARVIS_BASE_URL="%s"\nJARVIS_API_KEY="%s"\nJARVIS_MODEL="%s"\n' \
+    "${JARVIS_BASE_URL:-https://openrouter.ai/api/v1}" "$JARVIS_API_KEY" \
+    "${JARVIS_MODEL:-nvidia/nemotron-3.5-super-vl:free}" > "$CONF/config"
+  chmod 600 "$CONF/config"
+  echo "Настройки ИИ сохранены в $CONF/config"
+fi
+
 cat > "$HOME/.local/share/applications/jarvis.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Джарвис
-Comment=Голосовой помощник
+Comment=Помощник
 Exec=$BIN/jarvis
 Icon=utilities-terminal
 Terminal=true
@@ -51,5 +70,6 @@ if command -v gsettings >/dev/null && gsettings list-schemas | grep -q '^org.cin
 fi
 
 echo
-echo "Готово. Запуск: значок «Джарвис» на рабочем столе или в меню, сочетание Alt+7, команда: $BIN/jarvis"
-echo "Подключить ИИ: запустите Джарвиса и напишите «настройка»."
+echo "Готово. Запуск: $BIN/jarvis (или значок «Джарвис», Alt+7 в Cinnamon)."
+echo "Защита: запустите Джарвиса и напишите «пин», чтобы задать PIN."
+[ -n "${JARVIS_API_KEY:-}" ] || echo "Подключить ИИ: запустите Джарвиса и напишите «настройка»."
