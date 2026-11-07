@@ -1,0 +1,30 @@
+name: Jarvis
+on:
+  push:
+    branches: [main]
+    paths: ["jarvis/**", ".github/workflows/jarvis.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Тесты
+        run: python3 -m unittest discover -s jarvis -p "test_*.py"
+      - name: Сборка .deb
+        run: bash jarvis/packaging/build_deb.sh
+      - name: Постоянное имя файла
+        run: cp jarvis/dist/jarvis_*_all.deb jarvis/dist/jarvis_latest_all.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-deb
+          path: jarvis/dist/*.deb
+      - name: Публичный релиз jarvis-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view jarvis-latest >/dev/null 2>&1 || gh release create jarvis-latest \
+            --title "Джарвис (последняя версия)" --notes "Скачать jarvis_latest_all.deb и выполнить: sudo apt install ./jarvis_latest_all.deb"
+          gh release upload jarvis-latest jarvis/dist/*.deb --clobber
