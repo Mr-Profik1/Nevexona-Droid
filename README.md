@@ -3,10 +3,22 @@
 Linux-приложение для запуска Android-приложений через Waydroid и ADB: менеджер APK, каталог F-Droid, проверка совместимости системы. Waydroid ставится отдельно (см. установку ниже).
 
 ## Установка (Debian 13 / Ubuntu / Mint)
-1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts).
-2. `sudo apt install ./nevexona-droid_*_all.deb`
-3. `sudo apt install adb`
-   PySide6: если пакета `python3-pyside6.qtwidgets` нет в вашем дистрибутиве (старый Mint/Ubuntu), поставьте через pip: `pip install --user PySide6`
+1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts). Если скачался `.zip`, распакуйте его.
+2. Откройте терминал в папке с файлом и поставьте зависимости:
+   ```
+   sudo apt update
+   sudo apt install adb python3-pip
+   pip install --user PySide6
+   ```
+   Если в вашей системе есть пакет `python3-pyside6.qtwidgets`, вместо pip можно поставить его: `sudo apt install python3-pyside6.qtwidgets`.
+3. Установите пакет:
+   ```
+   sudo apt install ./nevexona-droid_*_all.deb
+   ```
+   Если пишет «Неразрешимая зависимость: python3-pyside6.qtwidgets» (старая версия пакета), выполните:
+   ```
+   sudo dpkg -i --ignore-depends=python3-pyside6.qtwidgets nevexona-droid_*_all.deb
+   ```
 4. Установите Waydroid: https://docs.waydro.id/usage/install-on-desktops
 5. Запустите из меню приложений или командой `nevexona-droid`, затем Android Engine → «Инициализировать Android».
 6. На Dashboard: Start Android → Show Android. При первом ADB-подключении подтвердите диалог отладки в окне Android.
