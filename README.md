@@ -21,6 +21,19 @@ waydroid session start
 
 Файл можно и скачать вручную: [setup.sh](https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/setup.sh), затем `bash setup.sh`.
 
+## Джарвис (ИИ-помощник для Linux)
+Установка:
+```
+curl -fsSL https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/install_jarvis.sh | bash
+```
+Подключить ИИ через OpenRouter. Ключ вставьте свой и не публикуйте его в репозитории. Имя модели возьмите на openrouter.ai/models (бесплатные помечены `:free`):
+```
+mkdir -p ~/.config/jarvis
+printf 'JARVIS_BASE_URL="https://openrouter.ai/api/v1"\nJARVIS_API_KEY="ВАШ-КЛЮЧ"\nJARVIS_MODEL="ИМЯ-МОДЕЛИ"\n' > ~/.config/jarvis/config
+chmod 600 ~/.config/jarvis/config
+```
+Запуск: значок «Джарвис» на рабочем столе, Alt+7 или команда `jarvis`. Полное разрешение: `sudo -v`, затем `JARVIS_AUTO=1 jarvis`. Подробнее: [jarvis/README.md](jarvis/README.md).
+
 ## Установка вручную (Debian 13 / Ubuntu / Mint)
 1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts). Если скачался `.zip`, распакуйте его.
 2. Откройте терминал в папке с файлом и выполните (нужен интернет):

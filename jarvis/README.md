@@ -19,7 +19,13 @@ curl -fsSL https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarv
 - Gemini: `https://generativelanguage.googleapis.com/v1beta/openai`
 
 Названия моделей меняются, берите актуальное на сайте сервиса. Доступность зависит от страны.
-Запустите Джарвиса и напишите `настройка`: он спросит адрес, ключ и модель и сохранит их в `~/.config/jarvis/config` (доступ только вам). Ключ никому не показывайте.
+Для OpenRouter одной командой (подставьте свой ключ и имя модели с `:free` из openrouter.ai/models):
+```
+mkdir -p ~/.config/jarvis
+printf 'JARVIS_BASE_URL="https://openrouter.ai/api/v1"\nJARVIS_API_KEY="ВАШ-КЛЮЧ"\nJARVIS_MODEL="ИМЯ-МОДЕЛИ"\n' > ~/.config/jarvis/config
+chmod 600 ~/.config/jarvis/config
+```
+Или запустите Джарвиса и напишите `настройка`: он спросит адрес, ключ и модель и сохранит их в `~/.config/jarvis/config` (доступ только вам). Ключ никому не показывайте.
 
 ## Свои короткие команды (макросы)
 ```
