@@ -1,4 +1,6 @@
-"""Проверки jarvis/jarvis.py: PIN, разбор ответов ИИ, экран (с заглушками xdotool/scrot), цикл с поддельным API."""
+"""Запуск: python3 -m unittest discover -s jarvis -p "test_*.py"
+
+Проверки jarvis.py: PIN, разбор ответов ИИ, экран (с заглушками xdotool/scrot), цикл с поддельным API."""
 import contextlib
 import importlib.util
 import io
@@ -14,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest import mock
 
-JARVIS = Path(__file__).resolve().parent.parent / "jarvis" / "jarvis.py"
+JARVIS = Path(__file__).resolve().parent / "jarvis.py"
 
 
 def load_module(home):
@@ -52,7 +54,9 @@ class Base(unittest.TestCase):
         self.j.PIN_FILE = os.path.join(cfg, "pin")
         self.j.LOCK_FILE = os.path.join(cfg, "pin.lock")
         self.j.LOG = os.path.join(self.home, "log")
-        self.j.time.sleep = lambda *_: None
+        sleep = mock.patch.object(self.j.time, "sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
         self.j.AUTO = False
         self.j.SCREEN.update(w=0, h=0, scale=1.0, always=False)
         out = contextlib.redirect_stdout(io.StringIO())

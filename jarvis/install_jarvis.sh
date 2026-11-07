@@ -18,14 +18,21 @@ else
   echo "apt-get не найден: поставьте вручную python3, curl, espeak-ng, xdotool, scrot."
 fi
 
-src="$(dirname "$0")/jarvis.py"
-if [ -f "$src" ]; then cp "$src" "$DIR/jarvis.py"; else curl -fsSL "$BASE/jarvis.py" -o "$DIR/jarvis.py"; fi
+for f in jarvis.py jarvis_web.py; do
+  src="$(dirname "$0")/$f"
+  if [ -f "$src" ]; then cp "$src" "$DIR/$f"; else curl -fsSL "$BASE/$f" -o "$DIR/$f"; fi
+done
 
+# jarvis = окно в браузере, jarvis-cli = терминал
 cat > "$BIN/jarvis" <<EOF
+#!/bin/sh
+exec python3 "$DIR/jarvis_web.py" "\$@"
+EOF
+cat > "$BIN/jarvis-cli" <<EOF
 #!/bin/sh
 exec python3 "$DIR/jarvis.py" "\$@"
 EOF
-chmod +x "$BIN/jarvis"
+chmod +x "$BIN/jarvis" "$BIN/jarvis-cli"
 
 if [ -n "${JARVIS_API_KEY:-}" ]; then
   umask 077
@@ -43,7 +50,7 @@ Name=Джарвис
 Comment=Помощник
 Exec=$BIN/jarvis
 Icon=utilities-terminal
-Terminal=true
+Terminal=false
 Categories=Utility;
 EOF
 
@@ -59,7 +66,7 @@ if command -v gsettings >/dev/null && gsettings list-schemas | grep -q '^org.cin
   p=/org/cinnamon/desktop/keybindings/custom-keybindings/jarvis/
   s="org.cinnamon.desktop.keybindings.custom-keybinding:$p"
   gsettings set "$s" name 'Джарвис' || true
-  gsettings set "$s" command "x-terminal-emulator -e $BIN/jarvis" || true
+  gsettings set "$s" command "$BIN/jarvis" || true
   gsettings set "$s" binding "['<Alt>7']" || true
   cur=$(gsettings get org.cinnamon.desktop.keybindings custom-list)
   case "$cur" in
@@ -70,6 +77,7 @@ if command -v gsettings >/dev/null && gsettings list-schemas | grep -q '^org.cin
 fi
 
 echo
-echo "Готово. Запуск: $BIN/jarvis (или значок «Джарвис», Alt+7 в Cinnamon)."
-echo "Защита: запустите Джарвиса и напишите «пин», чтобы задать PIN."
-[ -n "${JARVIS_API_KEY:-}" ] || echo "Подключить ИИ: запустите Джарвиса и напишите «настройка»."
+echo "Готово. Запуск: $BIN/jarvis (или значок «Джарвис», Alt+7 в Cinnamon). Терминальная версия: jarvis-cli."
+echo "Защита: в окне нажмите «PIN» и задайте PIN-код."
+[ -n "${JARVIS_API_KEY:-}" ] || echo "Подключить ИИ: в окне нажмите «Настройки»."
+case ":$PATH:" in *":$BIN:"*) ;; *) echo "Если команда jarvis не находится, перезайдите в сеанс или запускайте $BIN/jarvis" ;; esac

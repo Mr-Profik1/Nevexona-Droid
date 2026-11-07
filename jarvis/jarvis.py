@@ -20,10 +20,12 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -37,6 +39,8 @@ LOG = os.path.expanduser("~/.jarvis_log")
 PIN_ROUNDS = 200_000
 PIN_TRIES = 3
 PIN_LOCK_SECONDS = 60
+STOP = threading.Event()  # кнопка «Стоп» в окне: прерывает текущую задачу
+PIN_FAILS = {"n": 0}
 
 
 def load_config():
@@ -130,7 +134,8 @@ def say(text):
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def confirm(question):
+def confirm(question, detail=None):
+    """detail (команда целиком) нужен окну; в терминале она уже напечатана выше."""
     return input(f"{question} [y/N] ").strip().lower() in ("y", "д", "да")
 
 
@@ -320,6 +325,31 @@ def lock_left():
         return 0
 
 
+def try_pin(pin):
+    """Одна попытка ввода PIN: ("ok" | "bad" | "locked", секунд до конца блокировки)."""
+    left = lock_left()
+    if left:
+        return "locked", left
+    if check_pin(pin):
+        PIN_FAILS["n"] = 0
+        try:
+            os.remove(LOCK_FILE)
+        except OSError:
+            pass
+        return "ok", 0
+    PIN_FAILS["n"] += 1
+    if PIN_FAILS["n"] >= PIN_TRIES:
+        PIN_FAILS["n"] = 0
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(LOCK_FILE, "w", encoding="utf-8") as f:
+                f.write(str(time.time() + PIN_LOCK_SECONDS))
+        except OSError:
+            pass
+        return "locked", PIN_LOCK_SECONDS
+    return "bad", 0
+
+
 def unlock():
     """Спрашивает PIN при старте. True, если можно работать."""
     if not pin_set_up():
@@ -328,22 +358,15 @@ def unlock():
     if left:
         print(f"Слишком много неверных попыток. Подождите {left} с.")
         return False
-    for _ in range(PIN_TRIES):
-        if check_pin(getpass.getpass("PIN: ")):
-            try:
-                os.remove(LOCK_FILE)
-            except OSError:
-                pass
+    while True:
+        state, left = try_pin(getpass.getpass("PIN: "))
+        if state == "ok":
             return True
+        if state == "locked":
+            print(f"Доступ закрыт на {left} с.")
+            return False
         print("Неверный PIN.")
         time.sleep(1)
-    try:
-        with open(LOCK_FILE, "w", encoding="utf-8") as f:
-            f.write(str(time.time() + PIN_LOCK_SECONDS))
-    except OSError:
-        pass
-    print(f"Доступ закрыт на {PIN_LOCK_SECONDS} с.")
-    return False
 
 
 def pin_command(text):
@@ -593,17 +616,31 @@ def log_line(line):
 
 def run_logged(cmd):
     log_line(cmd)
-    try:
-        p = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=CMD_TIMEOUT)
-        return f"[код {p.returncode}]\n{(p.stdout + p.stderr).strip()[:MAX_OUT]}"
-    except subprocess.TimeoutExpired:
-        return f"[команда не завершилась за {CMD_TIMEOUT} секунд]"
+    p = subprocess.Popen(["bash", "-c", cmd], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, start_new_session=True)
+    start = time.time()
+    while True:
+        try:
+            out, err = p.communicate(timeout=0.5)
+            return f"[код {p.returncode}]\n{(out + err).strip()[:MAX_OUT]}"
+        except subprocess.TimeoutExpired:
+            stopped = STOP.is_set()
+            if stopped or time.time() - start > CMD_TIMEOUT:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                p.communicate()
+                return "[остановлено пользователем]" if stopped else f"[команда не завершилась за {CMD_TIMEOUT} секунд]"
 
 
 def ask_ai(history, task):
     """Возвращает True, если ИИ ответил; False, если нет связи (нужен запасной режим)."""
     history.append({"role": "user", "content": task})
     for _ in range(MAX_STEPS):
+        if STOP.is_set():
+            say("Остановлено.")
+            return True
         strip_old_images(history)
         has_image = any(isinstance(m["content"], list) for m in history[-20:])
         try:
@@ -616,6 +653,9 @@ def ask_ai(history, task):
         except Exception:  # noqa: BLE001  нет сети, таймаут и т.п.
             history.pop()
             return False
+        if STOP.is_set():
+            say("Остановлено.")
+            return True
         history.append({"role": "assistant", "content": reply})
         text, cmd, act = parse(reply)
         if text:
@@ -627,7 +667,7 @@ def ask_ai(history, task):
         if not cmd:
             return True
         print(f"  Команда: {cmd}")
-        if (not AUTO or DANGEROUS.search(cmd)) and not confirm("  Выполнить?"):
+        if (not AUTO or DANGEROUS.search(cmd)) and not confirm("  Выполнить?", detail=cmd):
             history.append({"role": "user", "content": "Пользователь отклонил команду."})
             say("Отменено.")
             return True
@@ -647,12 +687,58 @@ def wizard():
     if not (url and key and model):
         say("Отменено, нужны все три значения.")
         return
+    save_config(url, key, model)
+    say("Сохранено.")
+
+
+def save_config(url, key, model):
+    """Сохраняет адрес, ключ и модель в ~/.config/jarvis/config (доступ только владельцу)."""
+    global BASE_URL, API_KEY, MODEL
+    for v in (url, key, model):
+        if any(c in v for c in '"\n\r'):
+            raise ValueError("в адресе, ключе и модели не должно быть кавычек и переводов строки")
     os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
-    with open(CONFIG, "w", encoding="utf-8") as f:
+    fd = os.open(CONFIG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(f'JARVIS_BASE_URL="{url}"\nJARVIS_API_KEY="{key}"\nJARVIS_MODEL="{model}"\n')
     os.chmod(CONFIG, 0o600)
     BASE_URL, API_KEY, MODEL = url.rstrip("/"), key, model
-    say("Сохранено.")
+
+
+def process(text, history):
+    """Одна фраза пользователя (общая для терминала и окна). True, если нужно выйти."""
+    text = text.strip()
+    low = text.lower()
+    if not text:
+        return False
+    if low in ("выход", "пока", "exit", "quit"):
+        say("До свидания.")
+        return True
+    macros = load_macros()
+    if low in macros:
+        print(f"  Макрос: {macros[low]}")
+        print(run_logged(macros[low]))
+        return False
+    if macro_commands(text) or pin_command(text):
+        return False
+    if low in ("настройка", "setup"):
+        wizard()
+        return False
+    if not ai_ready() or low in QUICK:
+        if not simple(text):
+            say("Не понял. Напишите «помощь».")
+        return False
+    try:
+        answered = ask_ai(history, text)
+    except KeyboardInterrupt:
+        print()
+        say("Остановлено.")
+        return False
+    if not answered:
+        say("Нет связи с ИИ, перехожу в простой режим.")
+        if not simple(text):
+            say("Не понял. Напишите «помощь».")
+    return False
 
 
 def main():
@@ -680,38 +766,8 @@ def main():
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
-        low = text.lower()
-        if not text:
-            continue
-        if low in ("выход", "пока", "exit", "quit"):
-            say("До свидания.")
+        if process(text, history):
             return 0
-        macros = load_macros()
-        if low in macros:
-            print(f"  Макрос: {macros[low]}")
-            print(run_logged(macros[low]))
-            continue
-        if macro_commands(text):
-            continue
-        if pin_command(text):
-            continue
-        if low in ("настройка", "setup"):
-            wizard()
-            continue
-        if not ai_ready() or low in QUICK:
-            if not simple(text):
-                say("Не понял. Напишите «помощь».")
-            continue
-        try:
-            answered = ask_ai(history, text)
-        except KeyboardInterrupt:
-            print()
-            say("Остановлено.")
-            continue
-        if not answered:
-            say("Нет связи с ИИ, перехожу в простой режим.")
-            if not simple(text):
-                say("Не понял. Напишите «помощь».")
 
 
 if __name__ == "__main__":
