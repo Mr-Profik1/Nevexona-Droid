@@ -2,16 +2,24 @@
 
 Linux-приложение для запуска Android-приложений через Waydroid и ADB: менеджер APK, каталог F-Droid, проверка совместимости системы. Waydroid ставится отдельно (см. установку ниже).
 
-## Быстрая установка (один файл, с Waydroid)
-Скачайте [setup.sh](https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/setup.sh) (правой кнопкой → «Сохранить как») и запустите в терминале из папки с файлом:
-```
-bash setup.sh
-```
-Или одной командой без скачивания:
+## Установка: скопируйте и вставьте в терминал
+Шаг 1. Установка (приложение, PySide6, adb, Waydroid). Нужны интернет и пароль sudo:
 ```
 curl -fsSL https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/setup.sh | bash
 ```
-Скрипт поставит приложение, PySide6, adb и Waydroid без вопросов (нужны интернет и пароль sudo). После установки запуск: `nevexona-droid`, затем Android Engine → «Инициализировать Android» (скачает образ Android около 1 ГБ).
+Шаг 2. Запуск:
+```
+nevexona-droid
+```
+Шаг 3. В окне приложения нажмите Android Engine → «Инициализировать Android» (скачает образ Android около 1 ГБ). Затем на Dashboard: Start Android → Show Android.
+
+Если что-то не запустилось, посмотрите состояние Waydroid и пришлите вывод в Issues:
+```
+sudo waydroid init
+waydroid session start
+```
+
+Файл можно и скачать вручную: [setup.sh](https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/setup.sh), затем `bash setup.sh`.
 
 ## Установка вручную (Debian 13 / Ubuntu / Mint)
 1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts). Если скачался `.zip`, распакуйте его.
