@@ -2,6 +2,9 @@
 # Установка NEVEXONA Droid на Debian/Ubuntu/Mint. Системные пакеты ставятся только с вашего согласия.
 set -euo pipefail
 cd "$(dirname "$0")"
+YES=0
+case "${1:-}" in -y|--yes) YES=1 ;; esac
+ask() { [ "$YES" = 1 ] && return 0; local r; read -r -p "$1 [y/N] " r; [ "$r" = y ]; }
 command -v apt-get >/dev/null || { echo "Нужна система на базе Debian (apt)."; exit 1; }
 need=()
 need_pyside=0
@@ -17,8 +20,7 @@ command -v adb >/dev/null || need+=(adb)
 command -v waydroid >/dev/null || echo "Внимание: Waydroid не найден. Установка: https://docs.waydro.id/usage/install-on-desktops"
 if [ ${#need[@]} -gt 0 ]; then
   echo "Нужно установить: ${need[*]}"
-  read -r -p "Установить через sudo apt? [y/N] " a
-  [ "$a" = y ] || { echo "Отменено."; exit 1; }
+  ask "Установить через sudo apt?" || { echo "Отменено."; exit 1; }
   sudo apt-get install -y "${need[@]}"
 fi
 if [ "$need_pyside" = 1 ]; then
@@ -32,8 +34,7 @@ if ! command -v waydroid >/dev/null; then
   echo
   echo "Waydroid (Android) не установлен. Он ставится из официального репозитория waydro.id,"
   echo "затем образ Android (~1 ГБ) скачивается из приложения: Android Engine -> Инициализировать Android."
-  read -r -p "Установить Waydroid сейчас? [y/N] " w
-  if [ "$w" = y ]; then
+  if ask "Установить Waydroid сейчас?"; then
     sudo apt-get install -y curl ca-certificates
     curl -fsSL https://repo.waydro.id | sudo bash
     sudo apt-get install -y waydroid
