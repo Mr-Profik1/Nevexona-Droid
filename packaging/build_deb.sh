@@ -19,8 +19,8 @@ Section: utils
 Priority: optional
 Architecture: all
 Maintainer: NEVEXONA Corporation <noreply@nevexona.invalid>
-Depends: python3 (>= 3.10), python3-pyside6.qtwidgets
-Recommends: adb, waydroid
+Depends: python3 (>= 3.10)
+Recommends: python3-pyside6.qtwidgets, adb, waydroid
 Homepage: https://github.com/Mr-Profik1/Nevexona-Droid
 Description: NEVEXONA Droid - Android apps on Linux
  Graphical manager for Waydroid and ADB: install APKs, F-Droid catalog.
