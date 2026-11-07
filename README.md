@@ -11,25 +11,14 @@ sudo apt update && sudo apt install -y git && git clone https://github.com/Mr-Pr
 
 ## Установка вручную (Debian 13 / Ubuntu / Mint)
 1. Скачайте `.deb` из раздела **Releases** (или из Actions → Artifacts). Если скачался `.zip`, распакуйте его.
-2. Откройте терминал в папке с файлом и поставьте зависимости:
+2. Откройте терминал в папке с файлом и выполните (нужен интернет):
    ```
    sudo apt update
-   sudo apt install adb python3-pip
-   sudo apt install python3-pyside6.qtwidgets
-   ```
-   Если пакет `python3-pyside6.qtwidgets` не найден, поставьте PySide6 через pip:
-   ```
-   pip install --user --break-system-packages PySide6
-   ```
-   (Флаг `--break-system-packages` нужен на новых системах, где pip пишет `externally-managed-environment`.)
-3. Установите пакет:
-   ```
    sudo apt install ./nevexona-droid_*_all.deb
    ```
-   Если пишет «Неразрешимая зависимость: python3-pyside6.qtwidgets» (старая версия пакета), выполните:
-   ```
-   sudo dpkg -i --ignore-depends=python3-pyside6.qtwidgets nevexona-droid_*_all.deb
-   ```
+   Пакет сам доустановит PySide6 в `/opt/nevexona-droid/venv`, если его нет в системе (около 100 МБ). Отдельно ничего ставить не нужно.
+3. Для работы с Android поставьте `adb`: `sudo apt install adb` (обычно ставится сам как рекомендуемый пакет).
+   Если установка PySide6 не удалась (не было интернета), повторите: `sudo apt install --reinstall ./nevexona-droid_*_all.deb`.
 4. Установите Waydroid: https://docs.waydro.id/usage/install-on-desktops
 5. Запустите из меню приложений или командой `nevexona-droid`, затем Android Engine → «Инициализировать Android».
 6. На Dashboard: Start Android → Show Android. При первом ADB-подключении подтвердите диалог отладки в окне Android.
