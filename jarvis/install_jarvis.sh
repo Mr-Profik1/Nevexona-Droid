@@ -11,8 +11,8 @@ mkdir -p "$DIR" "$BIN" "$CONF" "$HOME/.local/share/applications"
 if command -v apt-get >/dev/null; then
   # python3 и curl обязательны; espeak-ng (голос), xdotool и scrot (управление экраном) по желанию
   sudo apt-get install -y python3 curl || { echo "Не удалось поставить python3 и curl."; exit 1; }
-  for p in espeak-ng xdotool scrot imagemagick; do
-    sudo apt-get install -y "$p" || echo "Не удалось поставить $p (голос или управление экраном могут не работать)."
+  for p in python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 espeak-ng xdotool scrot imagemagick; do
+    sudo apt-get install -y "$p" || echo "Не удалось поставить $p (окно приложения, голос или управление экраном могут не работать)."
   done
 else
   echo "apt-get не найден: поставьте вручную python3, curl, espeak-ng, xdotool, scrot."

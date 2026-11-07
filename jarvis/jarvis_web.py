@@ -392,6 +392,75 @@ def open_window(url):
     return False
 
 
+def load_gtk():
+    """GTK3 и WebKitGTK для настоящего окна приложения (без браузера). None, если библиотек нет."""
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        for ver in ("4.1", "4.0"):
+            try:
+                gi.require_version("WebKit2", ver)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+        from gi.repository import Gtk, WebKit2
+        return Gtk, WebKit2
+    except (ImportError, ValueError):
+        return None
+
+
+def open_external(uri):
+    """Ссылки с чужих сайтов открываем в браузере по умолчанию, а не внутри окна Джарвиса."""
+    if not uri.startswith(("http://", "https://")):
+        return False
+    opener = shutil.which("xdg-open")
+    if not opener:
+        return False
+    subprocess.Popen([opener, uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+    return True
+
+
+def run_native_window(url, mods):
+    """Окно приложения на GTK + WebKit. Возвращает True, когда окно было показано и закрыто,
+    и False, если окно не удалось создать (нет экрана и т.п.): тогда нужен запасной способ."""
+    Gtk, WebKit2 = mods
+    try:
+        ok = Gtk.init_check()
+        if isinstance(ok, tuple):
+            ok = ok[0]
+        if not ok:
+            return False
+        win = Gtk.Window(title="Джарвис")
+        win.set_default_size(1000, 800)
+        win.set_icon_name("jarvis")
+        view = WebKit2.WebView()
+    except Exception:  # noqa: BLE001 - любая ошибка GTK означает: используем запасной способ
+        return False
+    local = f"http://127.0.0.1:{APP.port}/"
+
+    def on_policy(_view, decision, dtype):
+        if dtype not in (WebKit2.PolicyDecisionType.NAVIGATION_ACTION,
+                         WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION):
+            return False
+        uri = decision.get_navigation_action().get_request().get_uri() or ""
+        if uri.startswith(local):
+            return False
+        decision.ignore()
+        open_external(uri)
+        return True
+
+    view.connect("decide-policy", on_policy)
+    win.connect("destroy", lambda *_: Gtk.main_quit())
+    win.add(view)
+    view.load_uri(url)
+    win.show_all()
+    Gtk.main()
+    return True
+
+
 def set_hotkey(binding="<Alt>7"):
     """Горячая клавиша запуска окна в Cinnamon (Linux Mint). Возвращает текст результата."""
     gs = shutil.which("gsettings")
@@ -444,13 +513,20 @@ def main():
     else:
         emit("say", text="Привет. Чтобы подключить ИИ, вставьте ключ OpenRouter в окне «Настройки». Остальное уже заполнено.")
     url = f"http://127.0.0.1:{APP.port}/?t={APP.token}"
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # Сначала настоящее окно приложения (GTK + WebKit); --browser или JARVIS_BROWSER=1 включает старый способ
+    use_native = "--browser" not in sys.argv and not os.environ.get("JARVIS_BROWSER")
+    mods = load_gtk() if use_native else None
+    if mods and run_native_window(url, mods):
+        APP.quit.set()
+        server.shutdown()
+        return 0
     if not open_window(url):
         sys.stderr.write(f"Не нашёл браузер. Откройте эту ссылку (одноразовая): {url}\n")
-    threading.Thread(target=watchdog, args=(server,), daemon=True).start()
     try:
-        server.serve_forever()
+        watchdog(server)
     except KeyboardInterrupt:
-        pass
+        server.shutdown()
     return 0
 
 

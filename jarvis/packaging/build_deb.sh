@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Собирает пакет jarvis_<версия>_all.deb (подходит для amd64) в jarvis/dist/.
+# Собирает пакет jarvis_<версия>_all.deb в jarvis/dist/. Код на чистом Python, поэтому один пакет
+# ставится на amd64, arm64 и другие архитектуры (Linux Mint 22.x, Ubuntu 22.04+, Debian 12+).
 # Нужен только dpkg-deb. Запуск: bash jarvis/packaging/build_deb.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -55,13 +56,14 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.10), espeak-ng, xdotool, scrot, imagemagick, xdg-utils
-Recommends: chromium | firefox | google-chrome-stable
+Recommends: python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0, chromium | firefox | google-chrome-stable
 Installed-Size: $SIZE
 Maintainer: Mr-Profik1 <noreply@users.noreply.github.com>
 Homepage: https://github.com/Mr-Profik1/Nevexona-Droid/tree/main/jarvis
 Description: Джарвис, помощник с чатом, командами и управлением экраном
  Окно с чатом (русский и английский), ИИ через любой сервис с OpenAI-совместимым
  API, выполнение команд, управление экраном под X11 (xdotool), PIN-защита.
+ Окно приложения на GTK и WebKitGTK; без них открывается в браузере.
  Запуск: команда jarvis или значок «Джарвис» в меню; терминальная версия: jarvis-cli.
 EOF
 chmod 644 "$ROOT/DEBIAN/control"

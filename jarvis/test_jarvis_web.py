@@ -126,6 +126,92 @@ class LauncherTests(unittest.TestCase):
     def test_no_browser(self):
         self.assertFalse(web.open_window("http://127.0.0.1:1/"))
 
+    def test_load_gtk_absent(self):
+        with mock.patch.dict(sys.modules, {"gi": None}):
+            self.assertIsNone(web.load_gtk())
+
+    def test_open_external_only_http(self):
+        self.stub("xdg-open")
+        self.assertFalse(web.open_external("file:///etc/passwd"))
+        self.assertFalse(web.open_external("javascript:alert(1)"))
+        self.assertTrue(web.open_external("https://openrouter.ai/keys"))
+        self.assertIn("xdg-open https://openrouter.ai/keys", self.calls()[0])
+
+    def test_open_external_without_xdg_open(self):
+        self.assertFalse(web.open_external("https://openrouter.ai/keys"))
+
+    def fake_gtk(self, init_ok=True):
+        events = {}
+
+        class Win:
+            def __init__(self, **kw):
+                events["title"] = kw.get("title")
+            def set_default_size(self, w, h): events["size"] = (w, h)
+            def set_icon_name(self, n): events["icon"] = n
+            def connect(self, name, cb): events.setdefault("win_signals", {})[name] = cb
+            def add(self, child): events["child"] = child
+            def show_all(self): events["shown"] = True
+
+        class View:
+            def connect(self, name, cb): events.setdefault("view_signals", {})[name] = cb
+            def load_uri(self, uri): events["uri"] = uri
+
+        class Gtk:
+            Window = Win
+            @staticmethod
+            def init_check(): return (init_ok, [])
+            @staticmethod
+            def main(): events["main_ran"] = True
+            @staticmethod
+            def main_quit(): events["quit"] = True
+
+        class PolicyDecisionType:
+            NAVIGATION_ACTION = 0
+            NEW_WINDOW_ACTION = 1
+            RESPONSE = 2
+
+        class WebKit2:
+            WebView = View
+        WebKit2.PolicyDecisionType = PolicyDecisionType
+        return Gtk, WebKit2, events
+
+    def test_native_window_opens_url(self):
+        Gtk, WebKit2, ev = self.fake_gtk()
+        self.assertTrue(web.run_native_window("http://127.0.0.1:1/?t=x", (Gtk, WebKit2)))
+        self.assertEqual(ev["title"], "Джарвис")
+        self.assertEqual(ev["uri"], "http://127.0.0.1:1/?t=x")
+        self.assertTrue(ev["shown"] and ev["main_ran"])
+        ev["win_signals"]["destroy"]()
+        self.assertTrue(ev["quit"])
+
+    def test_native_window_no_display(self):
+        Gtk, WebKit2, ev = self.fake_gtk(init_ok=False)
+        self.assertFalse(web.run_native_window("http://127.0.0.1:1/", (Gtk, WebKit2)))
+        self.assertNotIn("shown", ev)
+
+    def test_native_window_external_links_go_to_browser(self):
+        self.stub("xdg-open")
+        Gtk, WebKit2, ev = self.fake_gtk()
+        web.run_native_window("http://127.0.0.1:1/?t=x", (Gtk, WebKit2))
+        policy = ev["view_signals"]["decide-policy"]
+
+        class Decision:
+            ignored = False
+            def __init__(self, uri): self.uri = uri
+            def get_navigation_action(self): return self
+            def get_request(self): return self
+            def get_uri(self): return self.uri
+            def ignore(self): self.ignored = True
+
+        own = Decision(f"http://127.0.0.1:{web.APP.port}/api/x")
+        self.assertFalse(policy(None, own, WebKit2.PolicyDecisionType.NAVIGATION_ACTION))
+        self.assertFalse(own.ignored)
+        other = Decision("https://openrouter.ai/keys")
+        self.assertTrue(policy(None, other, WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION))
+        self.assertTrue(other.ignored)
+        self.assertIn("xdg-open https://openrouter.ai/keys", self.calls()[0])
+        self.assertFalse(policy(None, Decision("x"), WebKit2.PolicyDecisionType.RESPONSE))
+
     def gsettings_stub(self, custom_list):
         self.stub("gsettings", f'''echo "$@" >> "{self.log}"
 case "$1" in
