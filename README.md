@@ -15,9 +15,13 @@ sudo apt update && sudo apt install -y git && git clone https://github.com/Mr-Pr
    ```
    sudo apt update
    sudo apt install adb python3-pip
-   pip install --user PySide6
+   sudo apt install python3-pyside6.qtwidgets
    ```
-   Если в вашей системе есть пакет `python3-pyside6.qtwidgets`, вместо pip можно поставить его: `sudo apt install python3-pyside6.qtwidgets`.
+   Если пакет `python3-pyside6.qtwidgets` не найден, поставьте PySide6 через pip:
+   ```
+   pip install --user --break-system-packages PySide6
+   ```
+   (Флаг `--break-system-packages` нужен на новых системах, где pip пишет `externally-managed-environment`.)
 3. Установите пакет:
    ```
    sudo apt install ./nevexona-droid_*_all.deb
