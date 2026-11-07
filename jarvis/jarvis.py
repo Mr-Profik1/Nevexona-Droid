@@ -30,7 +30,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 CONFIG_DIR = os.path.expanduser("~/.config/jarvis")
 CONFIG = os.path.join(CONFIG_DIR, "config")
 MACROS = os.path.join(CONFIG_DIR, "macros.json")
@@ -82,12 +82,18 @@ SYSTEM = (
     "За один ответ делай одно: или run, или screen. "
     "Действие screen это объект: "
     '{"do":"shot"} сделать скриншот и получить его; '
-    '{"do":"click","x":100,"y":200} (также double_click, right_click, move); '
+    '{"do":"click","x":100,"y":200} (также double_click, triple_click, right_click, middle_click, move); '
+    '{"do":"drag","x":100,"y":200,"x2":400,"y2":200} перетащить с зажатой левой кнопкой; '
+    '{"do":"windows"} список открытых окон; {"do":"focus","name":"часть заголовка"} переключиться на окно; '
+    '{"do":"wait","seconds":2} подождать загрузку (до 10 секунд); '
     '{"do":"type","text":"текст"} напечатать текст; '
     '{"do":"key","keys":"ctrl+l"} нажать клавиши (формат xdotool: Return, ctrl+t, alt+F4); '
     '{"do":"scroll","dy":-3} прокрутка (минус вверх, плюс вниз). '
     "Координаты x,y считай по последнему скриншоту, который ты получил. "
     "Перед кликом по экрану сначала сделай shot и посмотри результат, после действия снова shot, чтобы проверить итог. "
+    "На скриншоте виден курсор мыши: по нему проверяй, попал ли клик. Целься в центр кнопки или поля. "
+    "Если программа уже открыта, сначала windows и focus, а не запускай её второй раз. После открытия программы или страницы сделай wait и shot. "
+    "Если клик не сработал, не повторяй те же координаты, а сделай новый shot и поправь. "
     "Если нужно выполнить команду, поставь её в run. Ты получишь её вывод и продолжишь. "
     "Когда задача выполнена или действий больше не нужно, оставь run пустым, screen null и скажи итог в say. "
     "Графические программы запускай так: setsid -f ПРОГРАММА >/dev/null 2>&1. "
@@ -405,7 +411,9 @@ def pin_command(text):
 # ---------- управление экраном (X11) ----------
 
 SCREEN = {"w": 0, "h": 0, "scale": 1.0, "always": False}
-SCREEN_DO = {"shot", "click", "double_click", "right_click", "move", "type", "key", "scroll"}
+SCREEN_DO = {"shot", "click", "double_click", "right_click", "middle_click", "triple_click", "move", "drag",
+             "type", "key", "scroll", "windows", "focus", "wait"}
+POINT_DO = ("click", "double_click", "right_click", "middle_click", "triple_click", "move", "drag")
 
 
 def screen_problem():
@@ -432,7 +440,8 @@ def take_shot():
     d = tempfile.mkdtemp(prefix="jarvis-")
     path = os.path.join(d, "s.png")
     try:
-        cmd = ["scrot", path] if shutil.which("scrot") else ["import", "-window", "root", path]
+        # -p: на снимке виден курсор мыши, по нему ИИ проверяет, куда попал клик
+        cmd = ["scrot", "-p", path] if shutil.which("scrot") else ["import", "-window", "root", path]
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         if p.returncode != 0 or not os.path.exists(path):
             raise RuntimeError((p.stderr or "скриншот не получился").strip()[:200])
@@ -470,10 +479,51 @@ def xdo(*args):
         raise RuntimeError((p.stderr or "xdotool вернул ошибку").strip()[:200])
 
 
+def xdo_out(*args):
+    """Как xdo, но возвращает вывод xdotool."""
+    p = subprocess.run(["xdotool", *map(str, args)], capture_output=True, text=True, timeout=20)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or "xdotool вернул ошибку").strip()[:200])
+    return p.stdout
+
+
+def list_windows(limit=30):
+    """Заголовки видимых окон: ИИ по ним понимает, что открыто, и может переключиться."""
+    ids = xdo_out("search", "--onlyvisible", "--name", ".").split()
+    rows = []
+    for wid in ids[:limit]:
+        try:
+            name = xdo_out("getwindowname", wid).strip()
+        except RuntimeError:
+            continue
+        if name:
+            rows.append(name)
+    return rows
+
+
+def focus_window(name):
+    """Переключает на окно, в заголовке которого есть name (без учёта регистра)."""
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("не указано имя окна")
+    ids = xdo_out("search", "--onlyvisible", "--name", "(?i)" + re.escape(name)).split()
+    if not ids:
+        raise ValueError(f"окно «{name}» не найдено")
+    xdo("windowactivate", "--sync", ids[-1])
+
+
 def describe_action(act, hide_text=False):
     kind = act.get("do")
-    if kind in ("click", "double_click", "right_click", "move"):
+    if kind == "drag":
+        return f"drag ({act.get('x')},{act.get('y')}) -> ({act.get('x2')},{act.get('y2')})"
+    if kind in POINT_DO:
         return f"{kind} ({act.get('x')},{act.get('y')})"
+    if kind == "focus":
+        return f"переключить на окно «{act.get('name')}»"
+    if kind == "windows":
+        return "список открытых окон"
+    if kind == "wait":
+        return f"подождать {act.get('seconds')} с"
     if kind == "type":
         text = str(act.get("text", ""))
         return f"type ({len(text)} символов)" if hide_text else f"напечатать «{text}»"
@@ -488,15 +538,39 @@ def screen_do(act):
     """Выполняет действие над экраном (кроме shot). Возвращает текст результата."""
     kind = str(act.get("do", "")).lower()
     try:
-        if kind in ("click", "double_click", "right_click", "move"):
+        if kind == "drag":
             x, y = to_real(act.get("x"), act.get("y"))
-            xdo("mousemove", x, y)
+            x2, y2 = to_real(act.get("x2"), act.get("y2"))
+            xdo("mousemove", "--sync", x, y)
+            xdo("mousedown", 1)
+            time.sleep(0.15)
+            xdo("mousemove", "--sync", (x + x2) // 2, (y + y2) // 2)
+            xdo("mousemove", "--sync", x2, y2)
+            time.sleep(0.15)
+            xdo("mouseup", 1)
+        elif kind in POINT_DO:
+            x, y = to_real(act.get("x"), act.get("y"))
+            xdo("mousemove", "--sync", x, y)
             if kind == "click":
                 xdo("click", 1)
             elif kind == "double_click":
                 xdo("click", "--repeat", 2, "--delay", 80, 1)
+            elif kind == "triple_click":
+                xdo("click", "--repeat", 3, "--delay", 80, 1)
             elif kind == "right_click":
                 xdo("click", 3)
+            elif kind == "middle_click":
+                xdo("click", 2)
+        elif kind == "windows":
+            rows = list_windows()
+            return "Открытые окна:\n" + "\n".join(rows) if rows else "Видимых окон не найдено."
+        elif kind == "focus":
+            focus_window(act.get("name"))
+        elif kind == "wait":
+            secs = float(act.get("seconds", 1))
+            if not 0 < secs <= 10:
+                return "ошибка: seconds от 0 до 10"
+            time.sleep(secs)
         elif kind == "type":
             text = str(act.get("text", ""))
             if not text:

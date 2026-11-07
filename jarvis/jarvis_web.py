@@ -490,6 +490,11 @@ def main():
         except (subprocess.CalledProcessError, OSError) as e:
             print(f"Не получилось задать сочетание: {e}")
             return 1
+    if "--check" in sys.argv:
+        problem = j.screen_problem()
+        print("Управление экраном готово: X11, xdotool и скриншоты на месте." if not problem
+              else "Управление экраном не готово: " + problem)
+        return 0 if not problem else 1
     if "--version" in sys.argv:
         print("jarvis " + getattr(j, "VERSION", "?"))
         return 0

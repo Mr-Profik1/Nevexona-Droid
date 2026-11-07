@@ -126,6 +126,16 @@ class LauncherTests(unittest.TestCase):
     def test_no_browser(self):
         self.assertFalse(web.open_window("http://127.0.0.1:1/"))
 
+    def test_check_flag(self):
+        with mock.patch.object(web.j, "screen_problem", return_value=None), \
+                mock.patch.object(sys, "argv", ["jarvis", "--check"]), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(web.main(), 0)
+        self.assertIn("готово", out.getvalue())
+        with mock.patch.object(web.j, "screen_problem", return_value="Сессия Wayland"), \
+                mock.patch.object(sys, "argv", ["jarvis", "--check"]), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(web.main(), 1)
+        self.assertIn("Wayland", out.getvalue())
+
     def test_load_gtk_absent(self):
         with mock.patch.dict(sys.modules, {"gi": None}):
             self.assertIsNone(web.load_gtk())

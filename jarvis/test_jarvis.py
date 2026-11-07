@@ -152,7 +152,7 @@ class ScreenBase(Base):
         Path(self.small).write_bytes(make_png(128, 64))
         self.xlog = os.path.join(self.home, "xdotool.log")
         self._stub("xdotool", f'echo "$@" >> "{self.xlog}"')
-        self._stub("scrot", f'cp "{self.real}" "$1"')
+        self._stub("scrot", f'for last; do :; done; cp "{self.real}" "$last"')
         self._stub("convert", f'for last; do :; done; cp "{self.small}" "$last"')
         env = {"PATH": self.stubs + os.pathsep + os.environ.get("PATH", ""), "DISPLAY": ":0"}
         p = mock.patch.dict(os.environ, env)
@@ -190,7 +190,42 @@ class ScreenTests(ScreenBase):
         self.assertAlmostEqual(self.j.SCREEN["scale"], 200 / 128)
         self.assertEqual(self.j.png_size(data), (128, 64))
         self.assertEqual(self.j.screen_do({"do": "click", "x": 64, "y": 32}), "Готово.")
-        self.assertEqual(self.xcalls(), ["mousemove 100 50", "click 1"])
+        self.assertEqual(self.xcalls(), ["mousemove --sync 100 50", "click 1"])
+
+    def test_new_pointer_actions(self):
+        self.j.take_shot()
+        for kind in ("middle_click", "triple_click"):
+            self.assertEqual(self.j.screen_do({"do": kind, "x": 64, "y": 32}), "Готово.")
+        self.assertEqual(self.xcalls(), ["mousemove --sync 100 50", "click 2",
+                                         "mousemove --sync 100 50", "click --repeat 3 --delay 80 1"])
+
+    def test_drag(self):
+        self.j.take_shot()
+        self.assertEqual(self.j.screen_do({"do": "drag", "x": 0, "y": 0, "x2": 64, "y2": 32}), "Готово.")
+        self.assertEqual(self.xcalls(), ["mousemove --sync 0 0", "mousedown 1", "mousemove --sync 50 25",
+                                         "mousemove --sync 100 50", "mouseup 1"])
+        self.assertIn("вне экрана", self.j.screen_do({"do": "drag", "x": 0, "y": 0, "x2": 999, "y2": 1}))
+
+    def test_windows_and_focus(self):
+        self._stub("xdotool", f'''echo "$@" >> "{self.xlog}"
+case "$1" in
+  search) printf '11\\n22\\n' ;;
+  getwindowname) [ "$2" = 11 ] && echo "Firefox" || echo "Терминал" ;;
+esac''')
+        out = self.j.screen_do({"do": "windows"})
+        self.assertIn("Firefox", out)
+        self.assertIn("Терминал", out)
+        self.assertEqual(self.j.screen_do({"do": "focus", "name": "fire"}), "Готово.")
+        self.assertIn("windowactivate --sync 22", self.xcalls())
+        self.assertIn("ошибка", self.j.screen_do({"do": "focus", "name": ""}))
+
+    def test_focus_not_found(self):
+        self.assertIn("не найдено", self.j.screen_do({"do": "focus", "name": "нет такого"}))
+
+    def test_wait_limits(self):
+        self.assertEqual(self.j.screen_do({"do": "wait", "seconds": 0.01}), "Готово.")
+        self.assertIn("ошибка", self.j.screen_do({"do": "wait", "seconds": 60}))
+        self.assertIn("ошибка", self.j.screen_do({"do": "wait", "seconds": "abc"}))
 
     def test_click_before_shot_and_out_of_range(self):
         self.assertIn("скриншот", self.j.screen_do({"do": "click", "x": 1, "y": 1}))
@@ -294,7 +329,7 @@ class AgentLoopTests(ScreenBase):
         ]
         history = []
         self.assertTrue(self.j.ask_ai(history, "нажми в центре"))
-        self.assertEqual(self.xcalls(), ["mousemove 100 50", "click 1"])
+        self.assertEqual(self.xcalls(), ["mousemove --sync 100 50", "click 1"])
         self.assertEqual(len(FakeAPI.requests), 4)
         first = FakeAPI.requests[0]["messages"]
         self.assertFalse(any(isinstance(m["content"], list) for m in first))
