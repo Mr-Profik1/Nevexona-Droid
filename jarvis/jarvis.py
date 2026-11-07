@@ -30,6 +30,7 @@ import time
 import urllib.error
 import urllib.request
 
+VERSION = "1.0.0"
 CONFIG_DIR = os.path.expanduser("~/.config/jarvis")
 CONFIG = os.path.join(CONFIG_DIR, "config")
 MACROS = os.path.join(CONFIG_DIR, "macros.json")

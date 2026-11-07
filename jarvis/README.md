@@ -8,7 +8,15 @@
 
 Работает на Linux (Debian/Ubuntu/Mint) под X11. На iPhone и в Termux на телефоне управление экраном и открытие программ недоступны.
 
-## Установка (одна команда)
+## Установка пакетом (рекомендуется)
+Для Linux Mint 22.1 и новее (а также Ubuntu 24.04+ и Debian 12+), 64-бит. Одна команда: скачает пакет, поставит его вместе с `espeak-ng`, `xdotool`, `scrot`, `imagemagick` и задаст горячую клавишу **Alt+7**:
+```
+wget https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/dist/jarvis_1.0.0_all.deb && sudo apt install ./jarvis_1.0.0_all.deb && jarvis --hotkey
+```
+Или скачайте файл `jarvis/dist/jarvis_1.0.0_all.deb` из репозитория и откройте двойным щелчком (Менеджер программ Mint). После установки Джарвис есть в меню («Джарвис»); запуск: `jarvis`; удаление: `sudo apt remove jarvis`. Настройки и PIN хранятся в `~/.config/jarvis` и при удалении пакета остаются.
+Пакет собирается командой `bash jarvis/packaging/build_deb.sh` (нужен только `dpkg-deb`).
+
+## Установка скриптом (если не нужен пакет)
 ```
 curl -fsSL https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/install_jarvis.sh | bash
 ```

@@ -368,6 +368,7 @@ def watchdog(server):
 
 
 def open_window(url):
+    # Chromium и родственные умеют окно без вкладок и адресной строки (--app)
     for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
                  "brave-browser", "microsoft-edge"):
         path = shutil.which(name)
@@ -375,6 +376,12 @@ def open_window(url):
             subprocess.Popen([path, f"--app={url}", "--window-size=1000,800"], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
             return True
+    # Firefox (браузер по умолчанию в Linux Mint): отдельное окно
+    path = shutil.which("firefox")
+    if path:
+        subprocess.Popen([path, "--new-window", url], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+        return True
     for opener in ("xdg-open", "sensible-browser"):
         path = shutil.which(opener)
         if path:
@@ -384,7 +391,38 @@ def open_window(url):
     return False
 
 
+def set_hotkey(binding="<Alt>7"):
+    """Горячая клавиша запуска окна в Cinnamon (Linux Mint). Возвращает текст результата."""
+    gs = shutil.which("gsettings")
+    schema = "org.cinnamon.desktop.keybindings"
+    if not gs:
+        return "Не найден gsettings: задайте сочетание вручную в Параметры → Клавиатура → Сочетания."
+    schemas = subprocess.run([gs, "list-schemas"], capture_output=True, text=True).stdout.split()
+    if schema not in schemas:
+        return "Это не Cinnamon: задайте сочетание клавиш вручную в настройках вашего рабочего стола."
+    slot = "jarvis"
+    path = f"/org/cinnamon/desktop/keybindings/custom-keybindings/{slot}/"
+    item = f"{schema}.custom-keybinding:{path}"
+    for key, value in (("name", "Джарвис"), ("command", "jarvis"), ("binding", f"['{binding}']")):
+        subprocess.run([gs, "set", item, key, value], check=True)
+    cur = subprocess.run([gs, "get", schema, "custom-list"], capture_output=True, text=True, check=True).stdout.strip()
+    if f"'{slot}'" not in cur:
+        names = re.findall(r"'([^']+)'", cur)
+        subprocess.run([gs, "set", schema, "custom-list", str(names + [slot])], check=True)
+    return f"Готово: {binding.replace('<', '').replace('>', '+')} открывает Джарвиса."
+
+
 def main():
+    if "--hotkey" in sys.argv:
+        try:
+            print(set_hotkey())
+            return 0
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"Не получилось задать сочетание: {e}")
+            return 1
+    if "--version" in sys.argv:
+        print("jarvis " + getattr(j, "VERSION", "?"))
+        return 0
     if "--cli" in sys.argv:
         return j.main()
     if os.name != "posix":

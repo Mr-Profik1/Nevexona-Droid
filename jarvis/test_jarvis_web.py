@@ -74,6 +74,73 @@ class CoreExtraTests(Base):
         self.assertTrue(self.j.ask_ai(history, "что-нибудь"))
 
 
+class LauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bin = Path(self.tmp.name)
+        self.log = self.bin / "calls.log"
+        p = mock.patch.dict(os.environ, {"PATH": str(self.bin)})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def stub(self, name, body='echo "$0 $@" >> "%s"'):
+        path = self.bin / name
+        path.write_text("#!/bin/sh\n" + (body % self.log if "%s" in body else body) + "\n")
+        path.chmod(0o755)
+
+    def calls(self):
+        end = time.time() + 3
+        while time.time() < end and not self.log.exists():
+            threading.Event().wait(0.05)
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_chromium_preferred_as_app_window(self):
+        self.stub("chromium")
+        self.stub("firefox")
+        self.assertTrue(web.open_window("http://127.0.0.1:1/?t=x"))
+        out = self.calls()
+        self.assertEqual(len(out), 1)
+        self.assertIn("chromium --app=http://127.0.0.1:1/?t=x", out[0])
+
+    def test_firefox_new_window(self):
+        self.stub("firefox")
+        self.assertTrue(web.open_window("http://127.0.0.1:1/?t=x"))
+        self.assertIn("firefox --new-window http://127.0.0.1:1/?t=x", self.calls()[0])
+
+    def test_no_browser(self):
+        self.assertFalse(web.open_window("http://127.0.0.1:1/"))
+
+    def gsettings_stub(self, custom_list):
+        self.stub("gsettings", f'''echo "$@" >> "{self.log}"
+case "$1" in
+  list-schemas) echo org.cinnamon.desktop.keybindings ;;
+  get) echo "{custom_list}" ;;
+esac''')
+
+    def test_hotkey_empty_list(self):
+        self.gsettings_stub("@as []")
+        self.assertIn("Alt+7", web.set_hotkey())
+        out = "\n".join(self.calls())
+        self.assertIn("command jarvis", out)
+        self.assertIn("binding ['<Alt>7']", out)
+        self.assertIn("custom-list ['jarvis']", out)
+
+    def test_hotkey_keeps_existing_and_is_idempotent(self):
+        self.gsettings_stub("['custom0']")
+        web.set_hotkey()
+        self.assertIn("custom-list ['custom0', 'jarvis']", "\n".join(self.calls()))
+        self.log.unlink()
+        self.gsettings_stub("['custom0', 'jarvis']")
+        web.set_hotkey()
+        self.assertNotIn("set org.cinnamon.desktop.keybindings custom-list", "\n".join(self.calls()))
+
+    def test_hotkey_not_cinnamon_or_no_gsettings(self):
+        self.assertIn("gsettings", web.set_hotkey())
+        self.stub("gsettings", 'echo org.gnome.desktop.interface')
+        self.assertIn("Cinnamon", web.set_hotkey())
+
+
 class WebBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
