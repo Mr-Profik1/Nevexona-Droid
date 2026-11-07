@@ -28,4 +28,15 @@ fi
 deb=$(ls dist/*.deb 2>/dev/null | head -1 || true)
 [ -n "$deb" ] || { ./packaging/build_deb.sh >/dev/null; deb=$(ls dist/*.deb | head -1); }
 sudo apt-get install -y "./$deb"
+if ! command -v waydroid >/dev/null; then
+  echo
+  echo "Waydroid (Android) не установлен. Он ставится из официального репозитория waydro.id,"
+  echo "затем образ Android (~1 ГБ) скачивается из приложения: Android Engine -> Инициализировать Android."
+  read -r -p "Установить Waydroid сейчас? [y/N] " w
+  if [ "$w" = y ]; then
+    sudo apt-get install -y curl ca-certificates
+    curl -fsSL https://repo.waydro.id | sudo bash
+    sudo apt-get install -y waydroid
+  fi
+fi
 echo "Готово. Запуск: nevexona-droid или из меню приложений."
