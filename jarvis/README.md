@@ -7,8 +7,8 @@
 ## Установка (три строки в терминале)
 Откройте терминал (`Ctrl+Alt+T`), вставьте строки (в терминале вставка `Ctrl+Shift+V`), на запрос введите пароль от компьютера:
 ```
-wget https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/dist/jarvis_1.3.0_all.deb
-sudo apt install ./jarvis_1.3.0_all.deb
+wget https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/dist/jarvis_1.3.1_all.deb
+sudo apt install ./jarvis_1.3.1_all.deb
 jarvis
 ```
 Откроется окно приложения. Вставьте ключ OpenRouter в «Настройки» и нажмите «Сохранить»: он запомнится. Проверить, что управление экраном готово: `jarvis --check`. Обновление: те же строки с новым номером версии.
@@ -21,9 +21,9 @@ jarvis
 
 **3. Вставьте команду** (в терминале вставка: `Ctrl+Shift+V`), нажмите Enter, введите пароль от компьютера (при вводе он не виден) и дождитесь конца установки:
 ```
-wget https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/dist/jarvis_1.3.0_all.deb && sudo apt install ./jarvis_1.3.0_all.deb && jarvis --hotkey
+wget https://raw.githubusercontent.com/Mr-Profik1/Nevexona-Droid/main/jarvis/dist/jarvis_1.3.1_all.deb && sudo apt install ./jarvis_1.3.1_all.deb && jarvis --hotkey
 ```
-Если `wget` не скачал файл: откройте `jarvis/dist/jarvis_1.3.0_all.deb` в репозитории на GitHub, скачайте вручную и выполните `sudo apt install ~/Загрузки/jarvis_1.3.0_all.deb`.
+Если `wget` не скачал файл: откройте `jarvis/dist/jarvis_1.3.1_all.deb` в репозитории на GitHub, скачайте вручную и выполните `sudo apt install ~/Загрузки/jarvis_1.3.1_all.deb`.
 
 **4. Запустите:** команда `jarvis` или «Джарвис» в меню. Быстрый вызов: **Alt+7**.
 

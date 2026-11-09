@@ -160,6 +160,9 @@ class LauncherTests(unittest.TestCase):
             def set_icon_name(self, n): events["icon"] = n
             def connect(self, name, cb): events.setdefault("win_signals", {})[name] = cb
             def add(self, child): events["child"] = child
+            def destroy(self):
+                events["destroyed"] = True
+                events["win_signals"]["destroy"]()
             def show_all(self): events["shown"] = True
 
         class View:
@@ -193,6 +196,23 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(ev["shown"] and ev["main_ran"])
         ev["win_signals"]["destroy"]()
         self.assertTrue(ev["quit"])
+
+    def test_native_window_crash_falls_back(self):
+        Gtk, WebKit2, ev = self.fake_gtk()
+        self.assertTrue(web.run_native_window("http://127.0.0.1:1/?t=x", (Gtk, WebKit2)) is True)
+        Gtk, WebKit2, ev = self.fake_gtk()
+
+        def crash_main():
+            ev["view_signals"]["web-process-crashed"](None)
+        Gtk.main = staticmethod(crash_main)
+        self.assertFalse(web.run_native_window("http://127.0.0.1:1/?t=x", (Gtk, WebKit2)))
+        self.assertTrue(ev["destroyed"] and ev["quit"])
+
+    def test_load_gtk_disables_gpu_tricks(self):
+        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.dict(sys.modules, {"gi": None}):
+            os.environ.pop("WEBKIT_DISABLE_COMPOSITING_MODE", None)
+            web.load_gtk()
+            self.assertEqual(os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"], "1")
 
     def test_native_window_no_display(self):
         Gtk, WebKit2, ev = self.fake_gtk(init_ok=False)

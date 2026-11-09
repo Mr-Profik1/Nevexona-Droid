@@ -394,6 +394,9 @@ def open_window(url):
 
 def load_gtk():
     """GTK3 и WebKitGTK для настоящего окна приложения (без браузера). None, если библиотек нет."""
+    # На старых видеокартах WebKit часто даёт пустое окно или падает: отключаем аппаратное ускорение
+    os.environ.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+    os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
     try:
         import gi
         gi.require_version("Gtk", "3.0")
@@ -452,13 +455,21 @@ def run_native_window(url, mods):
         open_external(uri)
         return True
 
+    state = {"failed": False}
+
+    def on_failure(*_):
+        state["failed"] = True
+        win.destroy()
+        return True
+
     view.connect("decide-policy", on_policy)
+    view.connect("web-process-crashed", on_failure)
     win.connect("destroy", lambda *_: Gtk.main_quit())
     win.add(view)
     view.load_uri(url)
     win.show_all()
     Gtk.main()
-    return True
+    return not state["failed"]
 
 
 def set_hotkey(binding="<Alt>7"):
@@ -522,10 +533,16 @@ def main():
     # Сначала настоящее окно приложения (GTK + WebKit); --browser или JARVIS_BROWSER=1 включает старый способ
     use_native = "--browser" not in sys.argv and not os.environ.get("JARVIS_BROWSER")
     mods = load_gtk() if use_native else None
-    if mods and run_native_window(url, mods):
-        APP.quit.set()
-        server.shutdown()
-        return 0
+    if mods:
+        if run_native_window(url, mods):
+            APP.quit.set()
+            server.shutdown()
+            return 0
+        # окно не получилось: ссылка входа одноразовая и могла сгореть, выдаём новую и открываем в браузере
+        APP.token = secrets.token_urlsafe(24)
+        APP.token_used = False
+        url = f"http://127.0.0.1:{APP.port}/?t={APP.token}"
+        sys.stderr.write("Окно приложения не открылось, открываю в браузере.\n")
     if not open_window(url):
         sys.stderr.write(f"Не нашёл браузер. Откройте эту ссылку (одноразовая): {url}\n")
     try:
